@@ -25,6 +25,7 @@ from .renderer_vtk import GravityScene
 from .themes import THEMES, BODY_COLORS, BODY_NAMES
 
 BODY_FIELDS = ("Mass", "Radius", "x", "y", "z", "vx", "vy", "vz")
+CUSTOM_PRESET = "Custom / Build your own"
 
 
 def _fmt(value):
@@ -147,6 +148,7 @@ class GravityLabApp:
         self.spin_omega_vars = [[tk.StringVar(value="0") for _ in range(3)] for _ in range(3)]
         self.preset_var = tk.StringVar(value=PRESET_NAMES[0])
         self.preset_info_var = tk.StringVar(value="")
+        self._custom_model_active = False
         self.units_var = tk.StringVar(value=ARBITRARY)
         self.G_var = tk.StringVar(value="1.0")
         self.dt_var = tk.StringVar(value="0.003")
@@ -459,8 +461,17 @@ class GravityLabApp:
                 self.speed_var.set(float(settings["speed"]))
             if "display_scale" in settings:
                 self.display_scale_var.set(float(settings["display_scale"]))
-            preset = payload.get("preset", "Custom / Loaded system")
-            self.preset_var.set(preset if preset in PRESETS else "Custom / Loaded system")
+            preset = payload.get("preset", CUSTOM_PRESET)
+            if preset in PRESETS:
+                self.preset_var.set(preset)
+                self._custom_model_active = False
+            else:
+                self.preset_var.set(CUSTOM_PRESET)
+                self._custom_model_active = True
+                self.preset_info_var.set(
+                    "Custom setup loaded. Edit body mass, radius, position and velocity, "
+                    "then click Apply values & reset."
+                )
             self.system_metadata = payload.get("metadata", {"source": "Loaded setup JSON", "names": []})
             self._configure_style()
             self.apply_theme_widgets()
@@ -810,9 +821,19 @@ class GravityLabApp:
 
         preset_box = ttk.LabelFrame(side, text="Starting system", padding=7)
         preset_box.pack(fill=tk.X, pady=(0, 7))
-        self.preset_combo = ttk.Combobox(preset_box, textvariable=self.preset_var, values=PRESET_NAMES, state="readonly")
+        self.preset_combo = ttk.Combobox(
+            preset_box,
+            textvariable=self.preset_var,
+            values=[CUSTOM_PRESET, *PRESET_NAMES],
+            state="readonly",
+        )
         self.preset_combo.pack(fill=tk.X)
-        self.preset_combo.bind("<<ComboboxSelected>>", lambda _e: self._load_preset())
+        self.preset_combo.bind("<<ComboboxSelected>>", self._on_preset_selected)
+        ttk.Button(
+            preset_box,
+            text="＋ Build a new custom model",
+            command=self._start_custom_model,
+        ).pack(fill=tk.X, pady=(5, 0))
         ttk.Label(preset_box, textvariable=self.preset_info_var, style="Sub.TLabel",
                   wraplength=365, justify=tk.LEFT).pack(anchor="w", pady=(5, 0))
 
@@ -820,17 +841,29 @@ class GravityLabApp:
             card = ttk.LabelFrame(side, text=f"BODY {i + 1}  ·  {BODY_NAMES[i]}", padding=7)
             card.pack(fill=tk.X, pady=4)
             ttk.Label(card, text="Mass", style="Panel.TLabel").grid(row=0, column=0, sticky="w")
-            ttk.Entry(card, textvariable=var_row[0], width=11).grid(row=0, column=1, sticky="ew", padx=(4, 7), pady=2)
+            mass_entry = ttk.Entry(card, textvariable=var_row[0], width=11)
+            mass_entry.grid(row=0, column=1, sticky="ew", padx=(4, 7), pady=2)
+            mass_entry.bind("<KeyRelease>", self._on_body_field_edited)
+            mass_entry.bind("<<Paste>>", self._on_body_field_edited)
             ttk.Label(card, text="Radius", style="Panel.TLabel").grid(row=0, column=2, sticky="w")
-            ttk.Entry(card, textvariable=var_row[1], width=11).grid(row=0, column=3, sticky="ew", padx=(4, 0), pady=2)
+            radius_entry = ttk.Entry(card, textvariable=var_row[1], width=11)
+            radius_entry.grid(row=0, column=3, sticky="ew", padx=(4, 0), pady=2)
+            radius_entry.bind("<KeyRelease>", self._on_body_field_edited)
+            radius_entry.bind("<<Paste>>", self._on_body_field_edited)
             ttk.Label(card, text="Position (x, y, z)", style="Panel.TLabel").grid(row=1, column=0, columnspan=4, sticky="w", pady=(4, 0))
             for j, axis in enumerate(("x", "y", "z")):
                 ttk.Label(card, text=axis, style="Panel.TLabel").grid(row=2, column=j*2, sticky="e", padx=(0, 3))
-                ttk.Entry(card, textvariable=var_row[2+j], width=9).grid(row=2, column=j*2+1, sticky="ew", padx=(0, 3), pady=2)
+                entry = ttk.Entry(card, textvariable=var_row[2+j], width=9)
+                entry.grid(row=2, column=j*2+1, sticky="ew", padx=(0, 3), pady=2)
+                entry.bind("<KeyRelease>", self._on_body_field_edited)
+                entry.bind("<<Paste>>", self._on_body_field_edited)
             ttk.Label(card, text="Velocity (vx, vy, vz)", style="Panel.TLabel").grid(row=3, column=0, columnspan=4, sticky="w", pady=(4, 0))
             for j, axis in enumerate(("vx", "vy", "vz")):
                 ttk.Label(card, text=axis, style="Panel.TLabel").grid(row=4, column=j*2, sticky="e", padx=(0, 3))
-                ttk.Entry(card, textvariable=var_row[5+j], width=9).grid(row=4, column=j*2+1, sticky="ew", padx=(0, 3), pady=2)
+                entry = ttk.Entry(card, textvariable=var_row[5+j], width=9)
+                entry.grid(row=4, column=j*2+1, sticky="ew", padx=(0, 3), pady=2)
+                entry.bind("<KeyRelease>", self._on_body_field_edited)
+                entry.bind("<<Paste>>", self._on_body_field_edited)
             for c in range(4):
                 card.columnconfigure(c, weight=1)
             ttk.Label(card, textvariable=self.metric_vars[i], style="Panel.TLabel", wraplength=360,
@@ -1018,9 +1051,114 @@ class GravityLabApp:
                     spin_omega=spin_omega, enable_1pn=self.enable_1pn_var.get(), c_light=c_light,
                     tidal_damping=tidal_damping if self.enable_tides_var.get() else 0.0)
 
+    def _on_preset_selected(self, _event=None):
+        """Route the model selector to either a built-in preset or editable custom setup.
+
+        Selecting Custom deliberately preserves the values currently in the body fields.
+        Use the "Build a new custom model" button to populate fresh example values.
+        """
+        selected = self.preset_var.get()
+        if selected == CUSTOM_PRESET:
+            self._custom_model_active = True
+            self.system_metadata = {
+                "source": "Custom model",
+                "preset": CUSTOM_PRESET,
+                "epoch": None,
+                "names": [],
+                "description": "User-defined three-body system.",
+            }
+            self.preset_info_var.set(
+                "Custom model selected. Current body values are preserved. Edit mass, radius, "
+                "position (x, y, z) and velocity (vx, vy, vz), then click Apply values & reset."
+            )
+            self.event_var.set("Custom model selected; existing body values were preserved.")
+            return
+        self._load_preset()
+
+    def _on_body_field_edited(self, _event=None):
+        """Mark hand-edited body parameters as a custom model without resetting fields."""
+        if self.preset_var.get() != CUSTOM_PRESET:
+            self.preset_var.set(CUSTOM_PRESET)
+        self._custom_model_active = True
+        self.system_metadata = {
+            "source": "Custom model",
+            "preset": CUSTOM_PRESET,
+            "epoch": None,
+            "names": [],
+            "description": "User-edited three-body system.",
+        }
+        self.preset_info_var.set(
+            "Custom model: body values have been edited. Click Apply values & reset to simulate them."
+        )
+
+    def _start_custom_model(self):
+        """Initialize an editable three-body system with useful, safe starting values."""
+        self._custom_model_active = True
+        self.preset_var.set(CUSTOM_PRESET)
+        self.units_var.set(ARBITRARY)
+        self.G_var.set("1.0")
+        self.dt_var.set("0.002")
+        self.steps_var.set("4")
+        self.soft_var.set("0.0")
+        self.rtol_var.set("1e-9")
+        self.atol_var.set("1e-12")
+        self.threshold_var.set("0.2")
+        self.view_var.set("6.0")
+        self.trail_len_var.set("1200")
+        self.restitution_var.set("1.0")
+        self.integrator_var.set(YOSHIDA)
+        self.collision_var.set(PASS)
+        self.adaptive_var.set(True)
+        self.autozoom_var.set(True)
+        self.trail_var.set(True)
+        self.floor_var.set(True)
+        self.shells_var.set(False)
+        self.field_var.set(False)
+        self.accel_var.set(False)
+        self.com_var.set(True)
+        self.enable_oblateness_var.set(False)
+        self.enable_1pn_var.set(False)
+        self.enable_tides_var.set(False)
+        self.c_light_var.set("1000.0")
+        self.tidal_damping_var.set("0.05")
+        for var in self.j2_vars:
+            var.set("0.0")
+        for row in self.spin_axis_vars:
+            for var, value in zip(row, ("0", "0", "1")):
+                var.set(value)
+        for row in self.spin_omega_vars:
+            for var in row:
+                var.set("0")
+
+        # Values are deliberately dimensionless, well separated, and editable.
+        # They are a starting system, not a claim that the initial state is periodic.
+        starter_bodies = (
+            (1.0, 0.12, -2.0, 0.0, 0.0, 0.0, -0.35, 0.0),
+            (1.0, 0.12,  2.0, 0.0, 0.0, 0.0,  0.35, 0.0),
+            (0.5, 0.10,  0.0, 3.0, 0.6, 0.20, 0.0, 0.0),
+        )
+        for row_vars, row_values in zip(self.body_vars, starter_bodies):
+            for var, value in zip(row_vars, row_values):
+                var.set(_fmt(value))
+        self.preset_info_var.set(
+            "Custom starter system loaded. Edit all three bodies as needed; positions and "
+            "velocities are 3D vectors. Press Apply values & reset when ready."
+        )
+        self.system_metadata = {
+            "source": "Custom model",
+            "preset": CUSTOM_PRESET,
+            "epoch": None,
+            "names": ["Custom body 1", "Custom body 2", "Custom body 3"],
+            "description": "User-defined three-body system initialized from the custom starter template.",
+        }
+        self._apply_display_options()
+        self._apply_reset(show_errors=False)
+        self.event_var.set("New custom model created. Edit body fields and Apply values & reset.")
+
     def _load_preset(self):
         if self.preset_var.get() not in PRESETS:
             return
+        self._custom_model_active = False
         p = PRESETS[self.preset_var.get()]
         self.preset_info_var.set(p.get("description", "Built-in demonstration system. Edit masses, positions, and velocities to experiment."))
         self.system_metadata = {"source": "Built-in preset", "preset": self.preset_var.get(),
@@ -1080,6 +1218,17 @@ class GravityLabApp:
                 messagebox.showerror("Invalid simulation values", str(exc), parent=self.root)
             return
         self.engine = engine
+        if self.preset_var.get() == CUSTOM_PRESET or self._custom_model_active:
+            self._custom_model_active = True
+            old_names = self.system_metadata.get("names", []) if isinstance(self.system_metadata, dict) else []
+            self.system_metadata = {
+                "source": "Custom model",
+                "preset": CUSTOM_PRESET,
+                "epoch": None,
+                "names": old_names if len(old_names) == 3 else ["Custom body 1", "Custom body 2", "Custom body 3"],
+                "description": "User-defined three-body system; body fields and simulation settings were applied from the GUI.",
+            }
+            self.preset_info_var.set("Custom model active. Edit values and apply again to restart from the new initial state.")
         self.initial_snapshot = {
             "m": np.asarray(p["m"], dtype=float).copy(),
             "R": np.asarray(p["R"], dtype=float).copy(),

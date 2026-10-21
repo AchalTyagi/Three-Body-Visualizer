@@ -1,6 +1,6 @@
 # Periodic-orbit seed catalog
 
-Gravity Lab 3D includes selected initial conditions for equal-mass planar Newtonian three-body periodic-orbit families. The gallery image is generated with this project's RK45 integrator, not copied from a source figure.
+Gravity Lab 3D includes selected initial conditions for equal-mass planar Newtonian three-body periodic-orbit families. The supplied inspiration image is an unlabeled gallery of 20 trajectories. This project exposes the 16 named periodic-orbit seeds for which this repository has initial conditions; the labels below refer to the standard seed families, not a claim that every displayed path is an exact pixel-by-pixel reconstruction of the inspiration image.
 
 ## Canonical equal-mass family setup
 
@@ -32,23 +32,16 @@ The three masses and gravitational constant are all 1 in arbitrary units. This m
 | Moth II | 0.439165939331987 | 0.452967645644678 | 28.670278 | Higher-precision seed |
 | Moth III | 0.383443534851074 | 0.377363693237305 | 25.840618 | Higher-precision seed |
 | Goggles | 0.0833000564575194 | 0.127889282226563 | 10.466818 | Higher-precision seed |
-| Yin–Yang I, branch a | 0.513938054919243 | 0.304736003875733 | 17.328370 | Higher-precision seed |
-| Yin–Yang I, branch b | 0.282698682308198 | 0.327208786129952 | 10.962563 | Higher-precision seed |
-| Yin–Yang II, branch a | 0.41682 | 0.33033 | 55.7898 | Rounded seed |
-| Yin–Yang II, branch b | 0.41734 | 0.31310 | 54.2076 | Rounded seed |
+| Yin-Yang I (A) | 0.513938054919243 | 0.304736003875733 | 17.328370 | Higher-precision seed |
+| Yin-Yang I (B) | 0.282698682308198 | 0.327208786129952 | 10.962563 | Higher-precision seed |
+| Yin-Yang II (A) | 0.41682 | 0.33033 | 55.7898 | Rounded seed |
+| Yin-Yang II (B) | 0.41734 | 0.31310 | 54.2076 | Rounded seed |
 | Dragonfly | 0.080584285736084 | 0.588836087036132 | 21.270975 | Higher-precision seed |
 | Yarn | 0.559064247347 | 0.349191558 | 55.501762 | Approximate high-precision seed |
 
-### Classic figure-eight and central configurations
+### Classic figure-eight
 
-The classic figure-eight preset uses a separate initial-state representation rather than the collinear isosceles seed scheme above. It uses equal masses, Newtonian gravity, and a nominal period of approximately 6.325914 model-time units.
-
-Two additional classical periodic solutions are included separately:
-
-- **Euler collinear rotating:** equal masses begin at `x = -1, 0, +1`; the outer masses have opposite tangential velocities of magnitude `sqrt(5/4)`, while the central body begins at rest. The collinear shape rotates rigidly with nominal period `2π / sqrt(5/4) ≈ 5.619852`.
-- **Lagrange equilateral:** the three equal masses begin at the vertices of an equilateral triangle of side length 1 and rotate rigidly around their center of mass. The nominal period is `2π / sqrt(3) ≈ 3.627599`.
-
-These are exact relative-equilibrium solutions in ideal Newtonian point-mass mechanics; finite-precision numerical integration can still accumulate error over time.
+The **Figure-eight** preset uses a separate initial-state representation rather than the collinear isosceles seed scheme above. It uses equal masses, Newtonian gravity, and a nominal period of approximately 6.325914 model-time units.
 
 ## Scientific use
 
