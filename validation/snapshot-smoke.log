@@ -1,0 +1,2 @@
+2026-10-22 18:32:13.096 (   1.067s) [    7F237B941780]vtkXOpenGLRenderWindow.:1460  WARN| bad X server connection. DISPLAY=:0
+Saved validation/baseline-smoke.png at t=0.1 (3D inclined triple (recommended))

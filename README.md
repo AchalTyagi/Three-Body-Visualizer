@@ -67,6 +67,12 @@ Select one of the equal-mass planar periodic-orbit presets to explore named fami
 - **Automated validation:** 41 built-in self-checks and pytest regression tests covering numerical convergence, conservation, collisions, advanced-model accounting, coordinate axes, and view modes.
 - **Command-line snapshots** in either 2D or 3D view mode.
 
+## Architecture and development
+
+See [`docs/architecture.md`](docs/architecture.md) for module responsibilities, the simulation loop, data flow, collision assumptions, and the staged refactor plan. The GUI-independent [`gravity_lab.state`](gravity_lab/state.py) module contains validated immutable `BodyState`, `IntegratorSettings`, `PhysicsSettings`, and `SimulationState` dataclasses; its design and invariants are described in [`docs/simulation-state-design.md`](docs/simulation-state-design.md). The model is being introduced before routing the live GUI through it so the current physics/render path stays unchanged during the first migration step.
+
+The model mapping methods are currently in-memory boundary helpers, not a stable on-disk format. Existing setup JSON remains schema version 1 until the dedicated serialization task introduces migrations/checkpoints.
+
 ## Physics model and accuracy notes
 
 - With `ε = 0`, the engine evaluates the unsoftened Newtonian inverse-square force. Physical radii do not alter the exterior field of spherical bodies; the collision handler prevents bodies from passing through contact in the usual collision modes.
