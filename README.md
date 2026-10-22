@@ -28,15 +28,15 @@ Switch the GUI to **Settings → Visualizer mode → 2D view** for an orthograph
 
 ![2D periodic-orbit view with world-fixed red X and green Y axes](docs/images/figure-eight-2d-preview.png)
 
-### Astronomical states
+### Astronomical preset
 
-The preset dropdown is reserved for the periodic-orbit gallery. For astronomical experiments, use **File → Import JPL Horizons states…** to load state vectors for three selected bodies, or build a custom system and choose astronomical units. The image below is an illustrative astronomical-scale scene, not a selectable built-in preset.
+The project includes a Sun–Earth–Jupiter starting system using astronomical units, solar masses, and years.
 
-![Illustrative astronomical-scale scene](docs/images/astronomical-preview.png)
+![Astronomical preset preview](docs/images/astronomical-preview.png)
 
 ### Periodic-orbit gallery
 
-Select one of the equal-mass planar periodic-orbit presets to explore named families such as Butterfly, Moth, Bumblebee, Goggles, Dragonfly, Yarn, and Yin–Yang. The curves below are generated with this project's own integrator from selected named family seeds. The user-supplied inspiration image is unlabeled, so the dropdown uses conventional orbit-family names rather than inventing labels for individual pixels.
+Select one of the equal-mass planar periodic-orbit presets to explore named families such as Butterfly, Moth, Bumblebee, Goggles, Dragonfly, Yarn, and Yin–Yang. The curves below are generated with this project's own integrator from the included initial-condition seeds.
 
 ![Periodic orbit gallery](docs/images/periodic-orbit-gallery.png)
 
@@ -44,7 +44,7 @@ Select one of the equal-mass planar periodic-orbit presets to explore named fami
 
 - **Switchable 2D / 3D viewport** rendered with VTK. 2D gives an orthographic top-down XY view; 3D provides mouse-driven camera rotation and zoom. The simulation physics remains 3D in either view.
 - **World-fixed RGB coordinate axes** that intersect at the world origin: X is red, Y is green, and Z is blue. Each axis has positive/negative end labels and numeric ticks on both sides of zero; a second grey cube-edge frame is deliberately omitted to avoid ambiguity.
-- **Editable bodies:** mass, physical radius, 3D position `(x, y, z)`, and velocity `(vx, vy, vz)`.
+- **Editable bodies:** mass, physical radius, 3D position `(x, y, z)`, and velocity `(vx, vy, vz)`. Rename each body and use **Customize Body** to open the system colour picker; the selected colour updates its sphere, influence shell, and trajectory.
 - **Body-property calculations:** surface gravity, escape speed, and mean density.
 - **Exact Newtonian gravity by default:** set softening `ε = 0` to use the inverse-square force outside physical contact. Optional non-zero Plummer softening is retained for numerical experiments and changes the force law.
 - **Three numerical integrators:** Velocity Verlet (2nd order), Yoshida (4th-order symplectic for fixed steps), and error-controlled Dormand–Prince RK45.
@@ -53,18 +53,18 @@ Select one of the equal-mass planar periodic-orbit presets to explore named fami
 - **Gravitational influence visualization:** acceleration-threshold shells and an approximate Eggleton Roche-lobe mode.
 - **Combined gravitational-field map:** an XY slice of the total gravitational acceleration produced by the active bodies.
 - **Visual aids:** trajectory trails, floor projections, acceleration-direction vectors, adjustable visual-size exaggeration, and camera fitting.
-- **Thirteen themes:** Midnight Dark, Minimal Dark, Light Minimal, Dark, Light, Solarized Light, Ocean Blue, Purple Nebula, High Contrast, Graphite, Aurora, Solar Flare, and Cyberpunk.
-- **Sixteen selected periodic-orbit presets inspired by the supplied gallery:** Butterfly I–IV, Bumblebee, Moth I–III, Goggles, Dragonfly, Yarn, Yin-Yang I (A/B), Yin-Yang II (A/B), and Figure-eight.
+- **Thirteen themes:** Midnight Dark, Minimal Dark, Light Minimal, Dark, Light, Solarized Light, Ocean Blue, Purple Nebula, High Contrast, Graphite, Aurora, Solar Flare, and Cyberpunk. Neutral charcoal **Dark** is now the default; **Light** uses soft off-white surfaces and subtle borders.
+- **Eighteen periodic-orbit presets:** Butterfly I–IV, Bumblebee, Moth I–III, Goggles, Dragonfly, Yarn, two Yin–Yang I branches, two Yin–Yang II branches, classic figure-eight, Euler collinear, and Lagrange equilateral.
 - **Diagnostics:** energy drift, angular-momentum drift, linear-momentum drift, minimum separation, pair-separation plots, an energy-drift plot, and RK45 accepted/rejected-step statistics.
 - **Validation tools:** GUI button to run numerical checks, plus tests for inverse-square gravity, collision tunneling, orbit closure, step-size convergence, RK45 tolerance convergence, conservation laws, and collision bookkeeping.
 - **Exports:** PNG snapshots and CSV simulation history.
-- **Astronomical units** (AU, solar masses, years) with selected SI conversions for body properties when using custom/JPL-imported states.
+- **Astronomical preset** with AU, solar-mass, and year units and selected SI conversions for body properties.
 - **JPL Horizons state-vector import** for a selectable trio of Solar System bodies and epoch. Vectors are fetched from the official Horizons API in the SSB-origin ecliptic frame, converted from AU/day to AU/year, and recentered to the selected trio's center-of-mass frame.
 - **Optional REBOUND IAS15 comparison** to compare the built-in RK45 integrator against an independent N-body reference integrator for the same unsoftened, collision-free initial state.
 - **Top menu bar:** File, Settings, and Help, in that order. Settings contains theme and 2D/3D view selectors plus advanced physics options; File contains JPL import, setup JSON load/save, PNG export, CSV history export, and REBOUND-report saving.
 - **Windows high-DPI awareness** configured before Tkinter is imported.
 - **Advanced physics options:** body spin and rotational energy/angular momentum, fixed-axis J2 oblateness, a pairwise weak-field first post-Newtonian (1PN) correction, radial tidal damping with an integrated heating proxy, and a simplified fragmentation collision mode.
-- **Automated validation:** 42 built-in self-checks and pytest regression tests covering numerical convergence, conservation, collisions, advanced-model accounting, coordinate axes, and view modes.
+- **Automated validation:** 41 built-in self-checks and pytest regression tests covering numerical convergence, conservation, collisions, advanced-model accounting, coordinate axes, and view modes.
 - **Command-line snapshots** in either 2D or 3D view mode.
 
 ## Physics model and accuracy notes
@@ -74,7 +74,7 @@ Select one of the equal-mass planar periodic-orbit presets to explore named fami
 - Collision time is estimated from relative position and velocity, followed by event-aware substeps and a swept-segment fallback. These are practical event-location safeguards, not a full analytic solution of the accelerated contact trajectory. For demanding close encounters, use RK45, tighten its tolerances, and verify convergence.
 - **Yoshida** is the preferred option for efficient long integrations at a fixed time step. Variable/adaptive step sizes generally weaken the exact symplectic property. **RK45** is the error-controlled choice for reference runs and rapidly changing trajectories, although its performance depends on sensible tolerances and does not guarantee that every physical model is correct.
 - Energy drift should be interpreted only for conservative motion. Merging and inelastic bouncing dissipate mechanical energy; momentum conservation and the collision energy budget are more useful checks during impacts.
-- Astronomical systems are now created through Custom / Build your own or the JPL Horizons importer; the preset dropdown is reserved for the image-inspired periodic-orbit gallery. The JPL Horizons importer can load a specific epoch for three selectable bodies. After import, the app evolves only those three bodies, so omitted planets do not continue to perturb them; a drift away from a full Solar System ephemeris is expected. Vectors use Horizons' ecliptic reference plane with the Solar System barycenter as origin, and are translated to the selected trio's center-of-mass frame without changing relative state vectors. Optional advanced corrections now include a pairwise weak-field 1PN approximation, a radial tidal-damping/heat proxy, body spin bookkeeping, and a fixed-axis J2 exterior field. These are reduced models with explicit limitations—not a full relativistic or extended-body solver.
+- The built-in astronomical preset is an idealized three-body system, not a full ephemeris prediction. The JPL Horizons importer can load a specific epoch for three selectable bodies. After import, the app evolves only those three bodies, so omitted planets do not continue to perturb them; a drift away from a full Solar System ephemeris is expected. Vectors use Horizons' ecliptic reference plane with the Solar System barycenter as origin, and are translated to the selected trio's center-of-mass frame without changing relative state vectors. Optional advanced corrections now include a pairwise weak-field 1PN approximation, a radial tidal-damping/heat proxy, body spin bookkeeping, and a fixed-axis J2 exterior field. These are reduced models with explicit limitations—not a full relativistic or extended-body solver.
 
 You can edit the **RK45 relative tolerance** and **RK45 absolute tolerance** fields in the GUI. Smaller tolerances generally increase computation and can improve integration accuracy; compare results rather than assuming that one tolerance fits every scale.
 
@@ -132,7 +132,7 @@ On Windows, you can also launch `run_gravity_lab.bat` from the project folder.
 
 ## Quick start
 
-1. Launch the application. **Butterfly I** is selected by default.
+1. Launch the application. The **3D inclined triple (recommended)** preset is selected by default.
 2. Rotate the 3D view by dragging with the mouse and zoom using the mouse wheel.
 3. Choose any built-in preset, or select **Custom / Build your own** to preserve the currently displayed body values and edit them freely.
 4. Click **＋ Build a new custom model** to populate a fresh three-body starter system. For each body, edit mass, radius, position `(x, y, z)`, and velocity `(vx, vy, vz)`.
@@ -162,34 +162,36 @@ List available starting systems from the terminal:
 python main.py --list-presets
 ```
 
-The preset dropdown contains only the selected, named periodic-orbit models inspired by the supplied image. Select **Custom / Build your own** to enter your own system, or use the JPL Horizons importer for astronomical initial conditions.
+Included presets include the original demonstration systems and an 18-model periodic-orbit gallery:
 
-- Butterfly I
-- Butterfly II
-- Butterfly III
-- Butterfly IV
+- 3D inclined triple (recommended)
+- Binary + inclined small body
+- Figure-eight, tilted 40 deg
+- Pythagorean 3-4-5
+- Lagrange triangle
+- Hierarchical triple
+- Sun - Earth - Jupiter (astronomical)
+- Butterfly I, II, III and IV
 - Bumblebee
-- Dragonfly
-- Figure-eight
+- Moth I, II and III
 - Goggles
-- Moth I
-- Moth II
-- Moth III
+- Dragonfly
 - Yarn
-- Yin-Yang I (A)
-- Yin-Yang I (B)
-- Yin-Yang II (A)
-- Yin-Yang II (B)
+- Yin–Yang I (two branches)
+- Yin–Yang II (two branches)
+- Classic planar figure-eight
+- Euler rotating collinear configuration
+- Lagrange rotating equilateral triangle
 
 ### Periodic-orbit seed notes
 
-The equal-mass planar seeds use the canonical setup described by Šuvakov and Dmitrašinović: initial positions at `(-1, 0)`, `(1, 0)`, and `(0, 0)`, with bodies 1 and 2 sharing velocity `(pₓ, pᵧ)` and body 3 assigned `(-2pₓ, -2pᵧ)` to make total linear momentum zero. The original study presents numerical initial conditions for several named families of Newtonian three-body periodic orbits ([Physical Review Letters paper](https://doi.org/10.1103/PhysRevLett.110.114301), [arXiv version](https://arxiv.org/abs/1303.0181)). This project includes selected seeds and branches for visualization; the classic figure-eight uses its own published initial-state form. See [`docs/periodic-orbit-seeds.md`](docs/periodic-orbit-seeds.md) for the included seed values. Some seeds are rounded; the nominal period shown in the preset description and seed catalog is a reference value, not a guarantee that a finite-precision integration will close exactly. For quantitative work, compare the final state after one nominal period against the initial state, tighten RK45 tolerances, and verify convergence.
+The equal-mass planar seeds use the canonical setup described by Šuvakov and Dmitrašinović: initial positions at `(-1, 0)`, `(1, 0)`, and `(0, 0)`, with bodies 1 and 2 sharing velocity `(pₓ, pᵧ)` and body 3 assigned `(-2pₓ, -2pᵧ)` to make total linear momentum zero. The original study presents numerical initial conditions for several named families of Newtonian three-body periodic orbits ([Physical Review Letters paper](https://doi.org/10.1103/PhysRevLett.110.114301), [arXiv version](https://arxiv.org/abs/1303.0181)). This project includes selected seeds and branches for visualization; the classic figure-eight uses its own published initial-state form. See [`docs/periodic-orbit-seeds.md`](docs/periodic-orbit-seeds.md) for the included seed values. Some seeds are rounded; the nominal period shown in a preset name is a reference value, not a guarantee that a finite-precision integration will close exactly. For quantitative work, compare the final state after one nominal period against the initial state, tighten RK45 tolerances, and verify convergence.
 
 These presets are initial conditions for experimentation, not a guarantee that every system is stable indefinitely. Three-body dynamics can be chaotic and small numerical differences may lead to large changes over time.
 
 ## Run the physics checks
 
-Run the built-in numerical self-test suite (currently 42 checks):
+Run the built-in numerical self-test suite (currently 41 checks):
 
 ```bash
 python main.py --selftest
@@ -210,15 +212,15 @@ The application supports a headless snapshot mode that advances a preset to a ch
 
 ```bash
 python main.py --snapshot preview.png \
-  --preset "Butterfly I" \
+  --preset "3D inclined triple (recommended)" \
   --time 3
 ```
 
-Render the figure-eight preset in 2D with another theme:
+Render the astronomical preset in 2D with another theme:
 
 ```bash
 python main.py --snapshot solar-2d.png \
-  --preset "Figure-eight" \
+  --preset "Sun - Earth - Jupiter (astronomical)" \
   --time 2 \
   --theme "Light" \
   --view-mode 2D
@@ -278,7 +280,7 @@ Gravity Lab 3D is designed for interactive exploration and numerical experimenta
 - **Tidal damping:** the optional model damps pairwise relative radial velocity and integrates the dissipated energy as a heat proxy. It is not a full equilibrium tide model and does not calculate Love numbers, tidal bulges, or spin synchronization. Use RK45 for this velocity-dependent model.
 - **Relativistic correction:** optional 1PN dynamics use a pairwise weak-field approximation, not the full Einstein–Infeld–Hoffmann N-body equations. The usual Newtonian energy readout omits the 1PN Hamiltonian, and this is not suitable for strong-field compact-object simulations. Use RK45 and check the weak-field regime.
 - **Fragmentation:** the two-remnant mode is a simplified educational collision response. It does not solve material strength, shock physics, hydrodynamics, or a debris-size distribution.
-- **Astronomical states:** the preset dropdown intentionally contains only the selected periodic-orbit gallery. Astronomical systems are created with Custom / Build your own or imported from JPL Horizons. JPL-imported systems evolve only the selected three bodies, so other planets no longer perturb them after import.
+- **Astronomical preset:** Sun–Earth–Jupiter is an idealized three-body starting condition rather than a full ephemeris prediction. JPL-imported systems still evolve only the selected three bodies, so other planets no longer perturb them after import.
 - **Visual-size exaggeration:** changing the displayed size of a sphere does not change its physical radius or the physics calculations.
 - **Periodic-orbit presets:** these are initial-condition seeds for known equal-mass planar orbit families, not arbitrary decorative curves. Several values are rounded, and some families can be sensitive to tiny perturbations. Treat the displayed nominal period as a reference and check orbit closure and convergence before using results quantitatively.
 - **Validation:** use the built-in tests and compare results across smaller time steps or tighter RK45 tolerances. Energy conservation is expected only for conservative motion; collisions can dissipate mechanical energy.

@@ -19,17 +19,11 @@
 
 ## Verification performed
 
-- `python main.py --selftest`: **42/42 passed**.
-- `python -m pytest -q`: **23 passed**.
+- `python main.py --selftest`: **41/41 passed**.
+- `python -m pytest -q`: **22 passed**.
 - GUI smoke test under a virtual display: verified menu order, all 13 themes, 2D/3D camera projection, J2/spin configuration, 1PN+tide RK45 stepping, and setup JSON round-trip.
 - Generated both 3D and 2D off-screen snapshots, including a full nominal figure-eight period in 2D.
 
 ## Model-scope caveats
 
 These are educational/numerical approximations. Spin torques and precession, full EIH N-body relativity, Love-number-based tidal bulges/synchronization, interior density profiles, and hydrodynamic fragmentation are not modeled. Interpret 1PN only in the weak-field regime and verify results through tolerance/time-step convergence.
-
-## Preset catalog cleanup
-
-- The selectable preset dropdown now contains only the 16 named periodic-orbit gallery seeds. Generic demo systems, the built-in Sun–Earth–Jupiter demo, and added Euler/Lagrange central-configuration demos were removed from the dropdown.
-- User-facing names are simplified to **Butterfly I**, **Bumblebee**, **Moth I**, **Yin-Yang I (A)**, **Figure-eight**, and similar short labels without the `Periodic ·` prefix or period suffix.
-- Custom model building and JPL Horizons import remain available outside the gallery preset list.

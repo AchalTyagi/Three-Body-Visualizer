@@ -4,7 +4,7 @@ Examples:
   python main.py
   python main.py --selftest
   python main.py --list-presets
-  python main.py --snapshot preview.png --preset "Figure-eight" --time 2 --view-mode 2D
+  python main.py --snapshot preview.png --preset "Sun - Earth - Jupiter (astronomical)" --time 2 --view-mode 2D
 """
 from __future__ import annotations
 import argparse
@@ -26,9 +26,9 @@ def build_parser():
     p.add_argument("--selftest", action="store_true", help="run numerical physics checks and exit")
     p.add_argument("--list-presets", action="store_true", help="print all system presets and exit")
     p.add_argument("--snapshot", metavar="PATH", help="render a headless PNG snapshot to PATH")
-    p.add_argument("--preset", default="Butterfly I", help="periodic-orbit preset for --snapshot")
+    p.add_argument("--preset", default="3D inclined triple (recommended)", help="system preset for --snapshot")
     p.add_argument("--time", type=float, default=0.0, help="advance simulation to this time before snapshot")
-    p.add_argument("--theme", default="Midnight Dark", help="theme for --snapshot")
+    p.add_argument("--theme", default="Dark", help="theme for --snapshot")
     p.add_argument("--width", type=int, default=1500, help="snapshot width in pixels")
     p.add_argument("--height", type=int, default=950, help="snapshot height in pixels")
     p.add_argument("--view-mode", choices=("2D", "3D"), default="3D", help="snapshot camera mode (2D XY or 3D)")
@@ -84,7 +84,7 @@ def main(argv=None):
         window = vtk.vtkRenderWindow()
         window.SetSize(max(320, args.width), max(240, args.height))
         window.SetOffScreenRendering(1)
-        scene = GravityScene(window, theme=args.theme if args.theme in THEMES else "Midnight Dark")
+        scene = GravityScene(window, theme=args.theme if args.theme in THEMES else "Dark")
         scene.set_view_mode(args.view_mode)
         display_scale = float(p.get("display_scale", 1.8))
         show_shells = bool(p.get("show_shells", True))

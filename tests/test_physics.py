@@ -33,7 +33,7 @@ def test_high_speed_bodies_do_not_tunnel_through_collision():
 
 
 def test_rk45_advances_exact_requested_interval():
-    p = PRESETS["Figure-eight"]
+    p = PRESETS["Figure-eight, tilted 40 deg (Claude)"]
     masses, radii, pos, vel = engine_inputs(p)
     engine = ThreeBodyEngine(masses, radii, pos, vel, p["G"], 0.0, collision=PASS, rtol=1e-8, atol=1e-11)
     initial = engine.pos.copy()

@@ -102,7 +102,7 @@ def _nice_tick_step(extent):
 
 
 class GravityScene:
-    def __init__(self, render_window=None, theme="Midnight Dark", grid_size=53):
+    def __init__(self, render_window=None, theme="Dark", grid_size=53):
         self.render_window = render_window or vtk.vtkRenderWindow()
         self.owns_window = render_window is None
         self.renderer = vtk.vtkRenderer()
@@ -125,6 +125,7 @@ class GravityScene:
         self._field_update_counter = 0
         self._frame_counter = 0
         self._history = [[], [], []]
+        self.body_colors = list(BODY_COLORS)
         self.max_trails = 1200
         self._field_extent = 8.0
         self._field_z = 0.0
@@ -293,7 +294,7 @@ class GravityScene:
         self.body_glow_actors = []
         self.body_spin_transforms = []
         self.spin_marker_sources, self.spin_marker_actors = [], []
-        for color in BODY_COLORS:
+        for color in self.body_colors:
             src = vtk.vtkSphereSource()
             src.SetRadius(1.0)
             src.SetThetaResolution(28)
@@ -345,7 +346,7 @@ class GravityScene:
 
     def _make_zones(self):
         self.zone_sources, self.zone_actors = [], []
-        for color in BODY_COLORS:
+        for color in self.body_colors:
             src = vtk.vtkSphereSource()
             src.SetRadius(1.0)
             src.SetThetaResolution(26)
@@ -365,7 +366,7 @@ class GravityScene:
     def _make_trails(self):
         self.trail_actors, self.trail_polys = [], []
         self.floor_actors, self.floor_polys = [], []
-        for i, color in enumerate(BODY_COLORS):
+        for i, color in enumerate(self.body_colors):
             actor, poly = _make_polyline_actor(color, width=1.8, opacity=0.88)
             self.renderer.AddActor(actor)
             self.trail_actors.append(actor)
@@ -377,7 +378,7 @@ class GravityScene:
 
     def _make_acceleration_vectors(self):
         self.acc_actors, self.acc_polys = [], []
-        for color in BODY_COLORS:
+        for color in self.body_colors:
             actor, poly = _make_polyline_actor(color, width=3.0, opacity=0.95)
             self.renderer.AddActor(actor)
             self.acc_actors.append(actor)
@@ -416,7 +417,7 @@ class GravityScene:
         self.ground_actor, self.ground_poly = actor, poly
 
     def set_theme(self, name):
-        self.theme_name = name if name in THEMES else "Midnight Dark"
+        self.theme_name = name if name in THEMES else "Dark"
         self.theme = THEMES[self.theme_name]
         bg = _hex_rgb(self.theme["plot_bg"])
         self.renderer.SetBackground(*bg)
@@ -427,6 +428,23 @@ class GravityScene:
         for actor, color in zip(self.axis_tick_actors, self.axis_colors):
             actor.GetProperty().SetColor(*_hex_rgb(color))
         self.field_actor.GetMapper().SetLookupTable(_build_lut(self.theme["field_stops"]))
+        self.render_window.Render()
+
+    def set_body_colors(self, colors):
+        """Apply the user's three display colors to bodies, shells and trajectories."""
+        if len(colors) != 3:
+            raise ValueError("Exactly three body colors are required.")
+        self.body_colors = [str(c).lower() for c in colors]
+        if not hasattr(self, "body_actors"):
+            return
+        actor_groups = (
+            getattr(self, "body_actors", []), getattr(self, "body_glow_actors", []),
+            getattr(self, "zone_actors", []), getattr(self, "trail_actors", []),
+            getattr(self, "floor_actors", []), getattr(self, "acc_actors", []),
+        )
+        for actors in actor_groups:
+            for actor, color in zip(actors, self.body_colors):
+                actor.GetProperty().SetColor(*_hex_rgb(color))
         self.render_window.Render()
 
     def set_display_options(self, *, display_scale=None, show_shells=None, show_field=None,
@@ -630,7 +648,7 @@ class GravityScene:
         writer.Write()
 
 
-def make_offscreen_snapshot(engine, path, theme="Midnight Dark", view_halfwidth=8.0, display_scale=1.8):
+def make_offscreen_snapshot(engine, path, theme="Dark", view_halfwidth=8.0, display_scale=1.8):
     window = vtk.vtkRenderWindow()
     window.SetSize(1500, 950)
     window.SetOffScreenRendering(1)

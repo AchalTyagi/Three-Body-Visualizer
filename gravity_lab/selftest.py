@@ -4,9 +4,8 @@ import math
 import numpy as np
 
 from .physics import (ThreeBodyEngine, body_properties, roche_fraction, VERLET, YOSHIDA, RK45,
-                      PASS, MERGE, BOUNCE, STOP, FRAGMENT, ZONE_THRESH, ZONE_ROCHE,
-                      G_AU_MSUN_YR)
-from .presets import PRESETS, engine_inputs
+                      PASS, MERGE, BOUNCE, STOP, FRAGMENT, ZONE_THRESH, ZONE_ROCHE)
+from .presets import PRESETS, engine_inputs, ASTRO
 from .fields import field_magnitude_grid
 
 
@@ -31,7 +30,7 @@ def run_selftest(verbose=True):
           f"fraction={roche_fraction(1):.4f}")
 
     # Force symmetry / Newton's third law.
-    p = PRESETS["Butterfly I"]
+    p = PRESETS["3D inclined triple (recommended)"]
     masses, radii, pos, vel = engine_inputs(p)
     eng = ThreeBodyEngine(masses, radii, pos, vel, p["G"], p["soft"], collision=PASS)
     net_force = np.sum(eng.m[:, None] * eng.accelerations(), axis=0)
@@ -56,7 +55,7 @@ def run_selftest(verbose=True):
           f"radius={zroche:.4g}")
 
     # Periodic figure-eight: both methods should approximately close after one period.
-    fig = PRESETS["Figure-eight"]
+    fig = PRESETS["Figure-eight, tilted 40 deg (Claude)"]
     masses, radii, pos, vel = engine_inputs(fig)
     period = 6.32591398
     for method in (VERLET, YOSHIDA):
@@ -157,33 +156,24 @@ def run_selftest(verbose=True):
     check("Pause-on-impact collision mode", sim.impact and len(sim.events) == 1,
           sim.events[-1][1] if sim.events else "no event emitted")
 
-    # Adaptive integration is still tested even though the general close-encounter
-    # demo is intentionally not exposed in the image-inspired preset dropdown.
-    pp_dt = 0.0015
-    sim = ThreeBodyEngine([3, 4, 5], [0.003, 0.0035, 0.004],
-                          [[1, 3, 0], [-2, -1, 0], [1, -1, 0]],
-                          np.zeros((3, 3)), G=1.0, softening=0.0, collision=PASS)
+    # Adaptive close-encounter integration should remain finite and bounded in energy.
+    pp = PRESETS["Pythagorean 3-4-5 (chaotic)"]
+    masses, radii, pos, vel = engine_inputs(pp)
+    sim = ThreeBodyEngine(masses, radii, pos, vel, pp["G"], pp["soft"], collision=PASS)
     while sim.t < 8.0 - 1e-9 and sim.is_healthy():
-        sim.advance(4, pp_dt, YOSHIDA, adaptive=True, max_wall=0.08)
+        sim.advance(4, pp["dt"], YOSHIDA, adaptive=True, max_wall=0.08)
     check("Adaptive close-encounter integration", sim.is_healthy() and sim.energy_error() < 5e-3,
           f"t={sim.t:.3f}, drift={sim.energy_error():.2e}")
 
-    # A separate ephemeris-style verification case keeps astronomical unit tests
-    # without cluttering the user-facing periodic-orbit gallery.
-    astro_masses = [1.0, 3.003e-6, 9.546e-4]
-    astro_radii = [0.00465047, 4.26e-5, 4.78e-4]
-    astro_pos = [[0, 0, 0], [1, 0, 0], [-5.2, 0, 0]]
-    v_j = 2 * math.pi / math.sqrt(5.2)
-    inclination = math.radians(11.5)
-    astro_vel = [[0, 0, 0], [0, 2 * math.pi, 0],
-                 [0, -v_j * math.cos(inclination), -v_j * math.sin(inclination)]]
-    sim = ThreeBodyEngine(astro_masses, astro_radii, astro_pos, astro_vel,
-                          G_AU_MSUN_YR, softening=0.0, collision=PASS)
+    # Earth-like orbit in AU/solar-mass/year units over one year.
+    astro = PRESETS["Sun - Earth - Jupiter (astronomical)"]
+    masses, radii, pos, vel = engine_inputs(astro)
+    sim = ThreeBodyEngine(masses, radii, pos, vel, astro["G"], astro["soft"], collision=PASS)
     r0 = float(np.linalg.norm(sim.pos[1] - sim.pos[0]))
     for _ in range(1000):
         sim.step(0.001, YOSHIDA)
     radius = float(np.linalg.norm(sim.pos[1] - sim.pos[0]))
-    check("Earth-like orbital radius after one year", abs(radius - r0) < 0.002,
+    check("Earth orbital radius after one year", abs(radius - r0) < 0.002,
           f"relative separation={radius:.5f} AU")
 
     # The field slice should be finite, non-negative and shaped as the input grid.
@@ -263,19 +253,9 @@ def run_selftest(verbose=True):
 
     # Published equal-mass periodic-orbit gallery seeds: these are rounded initial
     # conditions, so validate structure and invariants rather than exact closure.
-    gallery = list(PRESETS.items())
-    expected_gallery_names = {
-        "Butterfly I", "Butterfly II", "Butterfly III", "Butterfly IV", "Bumblebee",
-        "Dragonfly", "Figure-eight", "Goggles", "Moth I", "Moth II", "Moth III", "Yarn",
-        "Yin-Yang I (A)", "Yin-Yang I (B)", "Yin-Yang II (A)", "Yin-Yang II (B)",
-    }
-    check("Dropdown contains only the 16 image-gallery orbit presets",
-          set(PRESETS) == expected_gallery_names,
+    gallery = [(name, preset) for name, preset in PRESETS.items() if name.startswith("Periodic · ")]
+    check("Periodic orbit gallery contains 18 named models", len(gallery) == 18,
           f"models={len(gallery)}")
-    check("Preset labels are concise and match their display names",
-          all("Periodic ·" not in name and "T≈" not in name
-              and preset.get("model_name") == name for name, preset in gallery),
-          ", ".join(PRESETS))
     valid_gallery = True
     for name, preset in gallery:
         masses, radii, pos, vel = engine_inputs(preset)
@@ -292,15 +272,24 @@ def run_selftest(verbose=True):
     check("Periodic orbit seeds have equal masses and zero COM momentum", valid_gallery,
           "equal-mass, zero-momentum Newtonian seeds")
 
-    # The classic figure-eight is a directly inspectable reference orbit and
-    # should close over one nominal period with a tight adaptive tolerance.
+    # Analytic central-configuration solutions should return to their initial
+    # coordinates after one nominal period to within tight RK45 integration error.
     for preset_name, check_name in (
-        ("Figure-eight", "Figure-eight seed exposes a nominal period"),
-        ("Butterfly I", "Butterfly I seed exposes a nominal period"),
+        ("Periodic · Euler collinear (T≈5.6199)", "Euler collinear solution closes over one period"),
+        ("Periodic · Lagrange equilateral (T≈3.6276)", "Lagrange equilateral solution closes over one period"),
     ):
         preset = PRESETS[preset_name]
-        check(check_name, preset.get("period", 0) > 0 and preset.get("model_name") == preset_name,
-              f"period={preset.get('period', 0):.6g}")
+        masses, radii, pos, vel = engine_inputs(preset)
+        orbit = ThreeBodyEngine(masses, radii, pos, vel, preset["G"], preset["soft"],
+                                collision=PASS, rtol=1e-10, atol=1e-13)
+        pos0 = orbit.pos.copy()
+        nsteps = 300
+        h = preset["period"] / nsteps
+        for _ in range(nsteps):
+            orbit.step(h, RK45)
+        closure = float(np.max(np.abs(orbit.pos - pos0)))
+        check(check_name, orbit.is_healthy() and closure < 1e-7,
+              f"max coordinate closure error={closure:.2e}")
 
     if verbose:
         print(f"\n{sum(results)}/{len(results)} checks passed" if all(results)

@@ -68,17 +68,19 @@ THEMES = {
         "entry_bg": "#24153b", "border": "#492b64", "button_bg": "#301a4c",
         "button_active": "#4a236d", "grid": "#8a64aa", "field_stops": ["#0b0613", "#4a167b", "#a31fa8", "#f34d91", "#ffd166"],
     },
+    # Everyday neutral dark theme: soft charcoal surfaces and muted blue accents.
     "Dark": {
-        "app_bg": "#141414", "panel_bg": "#1e1e1e", "plot_bg": "#101010",
-        "text": "#f1f1f1", "muted": "#b0b0b0", "accent": "#d0d0d0",
-        "entry_bg": "#282828", "border": "#3b3b3b", "button_bg": "#303030",
-        "button_active": "#424242", "grid": "#696969", "field_stops": ["#101010", "#353535", "#666666", "#b0b0b0", "#f0f0f0"],
+        "app_bg": "#202124", "panel_bg": "#292a2d", "plot_bg": "#1b1c1e",
+        "text": "#e8eaed", "muted": "#bdc1c6", "accent": "#a8c7fa",
+        "entry_bg": "#303134", "border": "#444746", "button_bg": "#303134",
+        "button_active": "#3c4043", "grid": "#62666b", "field_stops": ["#202124", "#343942", "#4b596c", "#647f9f", "#9fb8d5"],
     },
+    # Everyday neutral light theme: soft off-white canvas, white panels, subtle borders.
     "Light": {
-        "app_bg": "#f3f5f7", "panel_bg": "#ffffff", "plot_bg": "#fbfcfd",
-        "text": "#20242a", "muted": "#5c6570", "accent": "#1769aa",
-        "entry_bg": "#ffffff", "border": "#c9d0d8", "button_bg": "#e4e8ed",
-        "button_active": "#d2dae3", "grid": "#9aa4af", "field_stops": ["#f7fbff", "#b9d8ef", "#4ea3c8", "#2166ac", "#142850"],
+        "app_bg": "#f8f9fa", "panel_bg": "#ffffff", "plot_bg": "#fafbfc",
+        "text": "#202124", "muted": "#5f6368", "accent": "#1a73e8",
+        "entry_bg": "#ffffff", "border": "#dadce0", "button_bg": "#f1f3f4",
+        "button_active": "#e8eaed", "grid": "#aeb4bb", "field_stops": ["#f8f9fa", "#e5edf8", "#c8d9ee", "#9bbde0", "#719bc9"],
     },
 }
 

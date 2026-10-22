@@ -6,11 +6,12 @@ import json
 import math
 import os
 import platform
+import re
 import threading
 import time
 from datetime import date, datetime, timezone
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, colorchooser
 
 import numpy as np
 import vtk
@@ -45,7 +46,7 @@ class SparkGraph(tk.Canvas):
         self.colors = colors
         self.data = []
         self.labels = []
-        self.palette = THEMES["Midnight Dark"]
+        self.palette = THEMES["Dark"]
 
     def set_theme(self, palette):
         self.palette = palette
@@ -134,7 +135,7 @@ class GravityLabApp:
         self.initial_snapshot = None
         self.last_reference_report = ""
 
-        self.theme_var = tk.StringVar(value="Midnight Dark")
+        self.theme_var = tk.StringVar(value="Dark")
         self.view_mode_var = tk.StringVar(value="3D")
         # Optional physics extensions. These are disabled by default so the
         # built-in presets retain their intended Newtonian dynamics.
@@ -174,6 +175,12 @@ class GravityLabApp:
         self.speed_var = tk.DoubleVar(value=1.0)
         self.display_scale_var = tk.DoubleVar(value=1.8)
         self.body_vars = [[tk.StringVar(value="0") for _ in BODY_FIELDS] for _ in range(3)]
+        self.body_name_vars = [tk.StringVar(value=name.title()) for name in BODY_NAMES]
+        self.body_colors = list(BODY_COLORS)
+        self.body_color_buttons = []
+        self.body_cards = []
+        for i, name_var in enumerate(self.body_name_vars):
+            name_var.trace_add("write", lambda *_args, idx=i: self._update_body_title(idx))
         self.metric_vars = [tk.StringVar(value="g: — | escape: — | density: —") for _ in range(3)]
         self.status_var = tk.StringVar(value="Starting simulation…")
         self.event_var = tk.StringVar(value="No events yet.")
@@ -188,7 +195,7 @@ class GravityLabApp:
         self._schedule_tick()
 
     def _configure_style(self):
-        self.palette = THEMES.get(self.theme_var.get(), THEMES["Midnight Dark"])
+        self.palette = THEMES.get(self.theme_var.get(), THEMES["Dark"])
         style = ttk.Style()
         try:
             style.theme_use("clam")
@@ -202,7 +209,11 @@ class GravityLabApp:
         style.configure("Title.TLabel", background=p["app_bg"], foreground=p["text"], font=("Segoe UI", 17, "bold"))
         style.configure("Sub.TLabel", background=p["app_bg"], foreground=p["muted"], font=("Segoe UI", 9))
         style.configure("TLabelframe", background=p["panel_bg"], foreground=p["text"], bordercolor=p["border"])
-        style.configure("TLabelframe.Label", background=p["panel_bg"], foreground=p["accent"], font=("Segoe UI", 9, "bold"))
+        style.configure("TLabelframe.Label", background=p["panel_bg"], foreground=p["muted"], font=("Segoe UI", 9, "bold"))
+        for i, color in enumerate(getattr(self, "body_colors", BODY_COLORS), start=1):
+            style.configure(f"Body{i}.TLabelframe", background=p["panel_bg"], bordercolor=p["border"])
+            style.configure(f"Body{i}.TLabelframe.Label", background=p["panel_bg"], foreground=color, font=("Segoe UI", 9, "bold"))
+            style.configure(f"Body{i}.Panel.TLabel", background=p["panel_bg"], foreground=color, font=("Segoe UI", 9))
         style.configure("TEntry", fieldbackground=p["entry_bg"], foreground=p["text"], insertcolor=p["text"], bordercolor=p["border"])
         style.configure("TCombobox", fieldbackground=p["entry_bg"], background=p["button_bg"], foreground=p["text"], arrowcolor=p["muted"])
         style.map("TCombobox", fieldbackground=[("readonly", p["entry_bg"])], foreground=[("readonly", p["text"])])
@@ -401,6 +412,8 @@ class GravityLabApp:
             "format": "gravity-lab-3d-setup", "schema_version": 1,
             "preset": self.preset_var.get(),
             "bodies": [[var.get() for var in row] for row in self.body_vars],
+            "body_names": [var.get().strip() for var in self.body_name_vars],
+            "body_colors": list(self.body_colors),
             "settings": settings,
             "metadata": self.system_metadata,
             "saved_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -428,6 +441,16 @@ class GravityLabApp:
             for row_vars, row_values in zip(self.body_vars, bodies):
                 for variable, value in zip(row_vars, row_values):
                     variable.set(str(value))
+            saved_names = payload.get("body_names", [])
+            if isinstance(saved_names, list) and len(saved_names) == 3:
+                for variable, value in zip(self.body_name_vars, saved_names):
+                    variable.set(str(value).strip() or "Body")
+            saved_colors = payload.get("body_colors", [])
+            if isinstance(saved_colors, list) and len(saved_colors) == 3 and all(
+                isinstance(c, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", c) for c in saved_colors
+            ):
+                self.body_colors = [c.lower() for c in saved_colors]
+                self._apply_body_colors()
             setting_vars = {
                 "units": self.units_var, "G": self.G_var, "dt": self.dt_var, "steps": self.steps_var,
                 "soft": self.soft_var, "rtol": self.rtol_var, "atol": self.atol_var,
@@ -475,6 +498,7 @@ class GravityLabApp:
             self.system_metadata = payload.get("metadata", {"source": "Loaded setup JSON", "names": []})
             self._configure_style()
             self.apply_theme_widgets()
+            self._apply_body_colors()
             self._apply_reset()
             self.event_var.set(f"Loaded setup: {os.path.basename(path)}")
         except Exception as exc:
@@ -572,6 +596,7 @@ class GravityLabApp:
             vals = [result.masses[i], result.radii[i], *result.positions[i], *result.velocities[i]]
             for variable, value in zip(self.body_vars[i], vals):
                 variable.set(_fmt(value))
+            self.body_name_vars[i].set(str(result.names[i]))
         self.preset_var.set("Custom / JPL Horizons")
         self.system_metadata = {
             "source": result.source, "epoch": result.epoch, "names": list(result.names),
@@ -837,37 +862,73 @@ class GravityLabApp:
         ttk.Label(preset_box, textvariable=self.preset_info_var, style="Sub.TLabel",
                   wraplength=365, justify=tk.LEFT).pack(anchor="w", pady=(5, 0))
 
+        self.body_color_buttons = []
+        self.body_cards = []
         for i, var_row in enumerate(self.body_vars):
-            card = ttk.LabelFrame(side, text=f"BODY {i + 1}  ·  {BODY_NAMES[i]}", padding=7)
+            card = ttk.LabelFrame(side, text=f"BODY {i + 1} · {self.body_name_vars[i].get()}",
+                                  style=f"Body{i+1}.TLabelframe", padding=7)
             card.pack(fill=tk.X, pady=4)
-            ttk.Label(card, text="Mass", style="Panel.TLabel").grid(row=0, column=0, sticky="w")
-            mass_entry = ttk.Entry(card, textvariable=var_row[0], width=11)
-            mass_entry.grid(row=0, column=1, sticky="ew", padx=(4, 7), pady=2)
+            self.body_cards.append(card)
+
+            identity = ttk.Frame(card, style="Panel.TFrame")
+            identity.pack(fill=tk.X, pady=(0, 4))
+            ttk.Label(identity, text="Name", style="Panel.TLabel").pack(side=tk.LEFT, padx=(0, 5))
+            name_entry = ttk.Entry(identity, textvariable=self.body_name_vars[i], width=14)
+            name_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+            color_button = tk.Button(
+                identity, text="Customize Body", command=lambda idx=i: self._customize_body(idx),
+                foreground=self.body_colors[i], background=self.palette["panel_bg"],
+                activeforeground=self.body_colors[i], activebackground=self.palette["button_active"],
+                relief=tk.FLAT, borderwidth=0, padx=5, pady=3, cursor="hand2",
+                font=("Segoe UI", 8, "bold"),
+            )
+            color_button.pack(side=tk.RIGHT)
+            self.body_color_buttons.append(color_button)
+
+            mass_radius = ttk.Frame(card, style="Panel.TFrame")
+            mass_radius.pack(fill=tk.X, pady=(1, 3))
+            mass_group = ttk.Frame(mass_radius, style="Panel.TFrame")
+            mass_group.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+            ttk.Label(mass_group, text="Mass", style="Panel.TLabel", width=6).pack(side=tk.LEFT)
+            mass_entry = ttk.Entry(mass_group, textvariable=var_row[0], width=10)
+            mass_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
             mass_entry.bind("<KeyRelease>", self._on_body_field_edited)
             mass_entry.bind("<<Paste>>", self._on_body_field_edited)
-            ttk.Label(card, text="Radius", style="Panel.TLabel").grid(row=0, column=2, sticky="w")
-            radius_entry = ttk.Entry(card, textvariable=var_row[1], width=11)
-            radius_entry.grid(row=0, column=3, sticky="ew", padx=(4, 0), pady=2)
+
+            radius_group = ttk.Frame(mass_radius, style="Panel.TFrame")
+            radius_group.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            ttk.Label(radius_group, text="Radius", style="Panel.TLabel", width=6).pack(side=tk.LEFT)
+            radius_entry = ttk.Entry(radius_group, textvariable=var_row[1], width=10)
+            radius_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
             radius_entry.bind("<KeyRelease>", self._on_body_field_edited)
             radius_entry.bind("<<Paste>>", self._on_body_field_edited)
-            ttk.Label(card, text="Position (x, y, z)", style="Panel.TLabel").grid(row=1, column=0, columnspan=4, sticky="w", pady=(4, 0))
+
+            ttk.Label(card, text="Position (x, y, z)", style="Panel.TLabel").pack(anchor="w", pady=(4, 1))
+            position_row = ttk.Frame(card, style="Panel.TFrame")
+            position_row.pack(fill=tk.X)
             for j, axis in enumerate(("x", "y", "z")):
-                ttk.Label(card, text=axis, style="Panel.TLabel").grid(row=2, column=j*2, sticky="e", padx=(0, 3))
-                entry = ttk.Entry(card, textvariable=var_row[2+j], width=9)
-                entry.grid(row=2, column=j*2+1, sticky="ew", padx=(0, 3), pady=2)
+                coordinate = ttk.Frame(position_row, style="Panel.TFrame")
+                coordinate.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0 if j == 0 else 4, 0))
+                ttk.Label(coordinate, text=axis, style="Panel.TLabel").pack(side=tk.LEFT, padx=(0, 3))
+                entry = ttk.Entry(coordinate, textvariable=var_row[2+j], width=8)
+                entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
                 entry.bind("<KeyRelease>", self._on_body_field_edited)
                 entry.bind("<<Paste>>", self._on_body_field_edited)
-            ttk.Label(card, text="Velocity (vx, vy, vz)", style="Panel.TLabel").grid(row=3, column=0, columnspan=4, sticky="w", pady=(4, 0))
+
+            ttk.Label(card, text="Velocity (vx, vy, vz)", style="Panel.TLabel").pack(anchor="w", pady=(4, 1))
+            velocity_row = ttk.Frame(card, style="Panel.TFrame")
+            velocity_row.pack(fill=tk.X)
             for j, axis in enumerate(("vx", "vy", "vz")):
-                ttk.Label(card, text=axis, style="Panel.TLabel").grid(row=4, column=j*2, sticky="e", padx=(0, 3))
-                entry = ttk.Entry(card, textvariable=var_row[5+j], width=9)
-                entry.grid(row=4, column=j*2+1, sticky="ew", padx=(0, 3), pady=2)
+                coordinate = ttk.Frame(velocity_row, style="Panel.TFrame")
+                coordinate.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0 if j == 0 else 4, 0))
+                ttk.Label(coordinate, text=axis, style="Panel.TLabel").pack(side=tk.LEFT, padx=(0, 3))
+                entry = ttk.Entry(coordinate, textvariable=var_row[5+j], width=8)
+                entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
                 entry.bind("<KeyRelease>", self._on_body_field_edited)
                 entry.bind("<<Paste>>", self._on_body_field_edited)
-            for c in range(4):
-                card.columnconfigure(c, weight=1)
-            ttk.Label(card, textvariable=self.metric_vars[i], style="Panel.TLabel", wraplength=360,
-                      foreground=BODY_COLORS[i]).grid(row=5, column=0, columnspan=4, sticky="w", pady=(5, 0))
+
+            ttk.Label(card, textvariable=self.metric_vars[i], style=f"Body{i+1}.Panel.TLabel",
+                      wraplength=360, justify=tk.LEFT).pack(anchor="w", pady=(5, 0))
 
         settings = ttk.LabelFrame(side, text="Physics and units", padding=7)
         settings.pack(fill=tk.X, pady=(7, 4))
@@ -931,20 +992,74 @@ class GravityLabApp:
         return combo
 
     def apply_theme_widgets(self):
-        self.palette = THEMES.get(self.theme_var.get(), THEMES["Midnight Dark"])
+        self.palette = THEMES.get(self.theme_var.get(), THEMES["Dark"])
         p = self.palette
         self.root.configure(bg=p["app_bg"])
         self.side_canvas.configure(bg=p["app_bg"])
         self.separation_graph.set_theme(p)
         self.energy_graph.set_theme(p)
+        self._apply_body_colors()
         if hasattr(self, "scene"):
             self.scene.set_theme(self.theme_var.get())
+            self.scene.set_body_colors(self.body_colors)
             self._dirty = True
 
     def _apply_theme(self):
         self._configure_style()
         self.apply_theme_widgets()
         self._render_once(force_field=True)
+
+    def _update_body_title(self, index):
+        """Keep the body-card title in sync with its editable display name."""
+        name = self.body_name_vars[index].get().strip() or f"Body {index + 1}"
+        if hasattr(self, "body_cards") and index < len(self.body_cards):
+            try:
+                self.body_cards[index].configure(text=f"BODY {index + 1} · {name}")
+            except tk.TclError:
+                pass
+        if isinstance(self.system_metadata, dict):
+            names = [v.get().strip() or f"Body {j + 1}" for j, v in enumerate(self.body_name_vars)]
+            self.system_metadata["names"] = names
+
+    def _customize_body(self, index):
+        """Open the native color wheel/dialog for the chosen body's display color."""
+        name = self.body_name_vars[index].get().strip() or f"Body {index + 1}"
+        chosen = colorchooser.askcolor(
+            color=self.body_colors[index], title=f"Choose colour for {name}", parent=self.root
+        )
+        if not chosen or not chosen[1]:
+            return
+        self.body_colors[index] = chosen[1].lower()
+        self._apply_body_colors()
+        self._dirty = True
+        if hasattr(self, "scene"):
+            self.scene.set_body_colors(self.body_colors)
+            self._render_once(force_field=False)
+        self.event_var.set(f"Updated appearance for {name}.")
+
+    def _apply_body_colors(self):
+        """Refresh swatches, metric accents, and the 3D actors after a color edit."""
+        if hasattr(self, "body_color_buttons"):
+            p = getattr(self, "palette", THEMES["Dark"])
+            for i, button in enumerate(self.body_color_buttons):
+                if i >= len(self.body_colors):
+                    continue
+                color = self.body_colors[i]
+                try:
+                    button.configure(foreground=color, activeforeground=color,
+                                     background=p["panel_bg"], activebackground=p["button_active"])
+                except tk.TclError:
+                    pass
+        try:
+            style = ttk.Style()
+            p = getattr(self, "palette", THEMES["Dark"])
+            for i, color in enumerate(self.body_colors, start=1):
+                style.configure(f"Body{i}.Panel.TLabel", background=p["panel_bg"], foreground=color)
+                style.configure(f"Body{i}.TLabelframe.Label", background=p["panel_bg"], foreground=color)
+        except tk.TclError:
+            pass
+        if hasattr(self, "scene"):
+            self.scene.set_body_colors(self.body_colors)
 
     def _on_mousewheel(self, event):
         try:
@@ -1140,6 +1255,8 @@ class GravityLabApp:
         for row_vars, row_values in zip(self.body_vars, starter_bodies):
             for var, value in zip(row_vars, row_values):
                 var.set(_fmt(value))
+        for i, name_var in enumerate(self.body_name_vars):
+            name_var.set(f"Custom body {i + 1}")
         self.preset_info_var.set(
             "Custom starter system loaded. Edit all three bodies as needed; positions and "
             "velocities are 3D vectors. Press Apply values & reset when ready."
@@ -1229,6 +1346,8 @@ class GravityLabApp:
                 "description": "User-defined three-body system; body fields and simulation settings were applied from the GUI.",
             }
             self.preset_info_var.set("Custom model active. Edit values and apply again to restart from the new initial state.")
+        if isinstance(self.system_metadata, dict):
+            self.system_metadata["names"] = [v.get().strip() or f"Body {i + 1}" for i, v in enumerate(self.body_name_vars)]
         self.initial_snapshot = {
             "m": np.asarray(p["m"], dtype=float).copy(),
             "R": np.asarray(p["R"], dtype=float).copy(),
