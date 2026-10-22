@@ -22,7 +22,7 @@ from .physics import (ThreeBodyEngine, History, VERLET, YOSHIDA, RK45, INTEGRATO
                       MERGE, BOUNCE, PASS, STOP, FRAGMENT, COLLISION_MODES, ZONE_THRESH,
                       ZONE_ROCHE, ZONE_MODES, AU_M, YEAR_S, MSUN_KG, G_AU_MSUN_YR, C_AU_PER_YEAR)
 from .presets import PRESETS, PRESET_NAMES, ARBITRARY, ASTRO, engine_inputs
-from .renderer_vtk import GravityScene
+from .renderer_vtk import GravityScene, ray_plane_intersection
 from .themes import THEMES, BODY_COLORS, BODY_NAMES
 
 BODY_FIELDS = ("Mass", "Radius", "x", "y", "z", "vx", "vy", "vz")
@@ -137,6 +137,8 @@ class GravityLabApp:
 
         self.theme_var = tk.StringVar(value="Dark")
         self.view_mode_var = tk.StringVar(value="3D")
+        self.move_bodies_var = tk.BooleanVar(value=False)
+        self._body_drag_state = None
         # Optional physics extensions. These are disabled by default so the
         # built-in presets retain their intended Newtonian dynamics.
         self.enable_oblateness_var = tk.BooleanVar(value=False)
@@ -373,7 +375,9 @@ class GravityLabApp:
         messagebox.showinfo("Keyboard shortcuts",
             "Space — Play / pause simulation\nR — Apply values and reset (when an entry is not focused)\n"
             "2 — Switch to 2D XY view\n3 — Switch to 3D view\n"
-            "Mouse drag — Rotate the 3D camera (3D mode)\nMouse wheel — Zoom\n"
+            "Mouse drag — Rotate the camera (normal mode)\nMouse wheel — Zoom\n"
+            "Move bodies — Enable in the toolbar, then drag a sphere to place it; scroll while dragging to change depth.\n"
+            "Place from coordinates — Type X/Y/Z in a body card, then click the button or press Enter.\n"
             "Settings → Visualizer mode — Switch between 2D XY and 3D views\n"
             "File — Import JPL Horizons data and save/export results.", parent=self.root)
 
@@ -726,6 +730,8 @@ class GravityLabApp:
                                   state="readonly", width=7)
         view_combo.pack(side=tk.LEFT, padx=(0, 10))
         view_combo.bind("<<ComboboxSelected>>", lambda _e: self._apply_view_mode())
+        ttk.Checkbutton(toolbar, text="Move bodies", variable=self.move_bodies_var,
+                        command=self._toggle_body_move_mode).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(toolbar, text="Advanced physics…", command=self._open_advanced_physics_dialog).pack(side=tk.LEFT, padx=3)
         ttk.Button(toolbar, text="Pause / Play", command=self._toggle_running).pack(side=tk.LEFT, padx=3)
         ttk.Button(toolbar, text="Reset", command=self._apply_reset).pack(side=tk.LEFT, padx=3)
@@ -799,19 +805,19 @@ class GravityLabApp:
         return vtk.vtkRenderWindow()
 
     def _bind_vtk_mouse_events(self):
-        self.vtk_canvas.bind("<ButtonPress-1>", lambda e: self._vtk_mouse(e, "LeftButtonPressEvent"))
-        self.vtk_canvas.bind("<ButtonRelease-1>", lambda e: self._vtk_mouse(e, "LeftButtonReleaseEvent"))
+        self.vtk_canvas.bind("<ButtonPress-1>", self._on_vtk_left_press)
+        self.vtk_canvas.bind("<ButtonRelease-1>", self._on_vtk_left_release)
         self.vtk_canvas.bind("<ButtonPress-2>", lambda e: self._vtk_mouse(e, "MiddleButtonPressEvent"))
         self.vtk_canvas.bind("<ButtonRelease-2>", lambda e: self._vtk_mouse(e, "MiddleButtonReleaseEvent"))
         self.vtk_canvas.bind("<ButtonPress-3>", lambda e: self._vtk_mouse(e, "RightButtonPressEvent"))
         self.vtk_canvas.bind("<ButtonRelease-3>", lambda e: self._vtk_mouse(e, "RightButtonReleaseEvent"))
-        self.vtk_canvas.bind("<B1-Motion>", lambda e: self._vtk_mouse(e, "MouseMoveEvent"))
+        self.vtk_canvas.bind("<B1-Motion>", self._on_vtk_left_motion)
         self.vtk_canvas.bind("<B2-Motion>", lambda e: self._vtk_mouse(e, "MouseMoveEvent"))
         self.vtk_canvas.bind("<B3-Motion>", lambda e: self._vtk_mouse(e, "MouseMoveEvent"))
         self.vtk_canvas.bind("<Motion>", lambda e: self._vtk_mouse(e, "MouseMoveEvent"))
         self.vtk_canvas.bind("<MouseWheel>", self._vtk_wheel)
-        self.vtk_canvas.bind("<Button-4>", lambda e: self._vtk_mouse(e, "MouseWheelForwardEvent"))
-        self.vtk_canvas.bind("<Button-5>", lambda e: self._vtk_mouse(e, "MouseWheelBackwardEvent"))
+        self.vtk_canvas.bind("<Button-4>", lambda e: self._on_vtk_wheel_direction(e, 1))
+        self.vtk_canvas.bind("<Button-5>", lambda e: self._on_vtk_wheel_direction(e, -1))
 
     def _vtk_mouse(self, event, vtk_event):
         try:
@@ -822,7 +828,176 @@ class GravityLabApp:
         except (AttributeError, RuntimeError):
             pass
 
+    def _toggle_body_move_mode(self):
+        """Pause the integrator while allowing precise interactive placement."""
+        if self.move_bodies_var.get():
+            self.running = False
+            if self.com_var.get():
+                # Dragged coordinates are world coordinates. Do not silently
+                # translate the just-placed system back to its COM on commit.
+                self.com_var.set(False)
+                self.event_var.set("Body placement enabled; COM centering was turned off so dropped coordinates stay exact.")
+            else:
+                self.event_var.set("Body placement enabled. Drag a sphere; scroll during the drag to change depth.")
+            self.vtk_canvas.configure(cursor="crosshair")
+        else:
+            self._body_drag_state = None
+            self.vtk_canvas.configure(cursor="")
+            self.event_var.set("Body placement disabled. Drag the viewport to rotate; scroll to zoom.")
+        self._update_status()
+
+    def _event_display_xy(self, event):
+        height = max(1, self.vtk_canvas.winfo_height())
+        return float(event.x), float(height - event.y)
+
+    def _world_point_on_plane(self, display_x, display_y, plane_origin, plane_normal):
+        """Project a display point onto a world-space plane via its camera ray."""
+        renderer = self.scene.renderer
+        ray_points = []
+        for depth in (0.0, 1.0):
+            renderer.SetDisplayPoint(float(display_x), float(display_y), depth)
+            renderer.DisplayToWorld()
+            homogeneous = np.asarray(renderer.GetWorldPoint(), dtype=float)
+            if homogeneous.size != 4 or not np.all(np.isfinite(homogeneous)) or abs(homogeneous[3]) < 1e-14:
+                return None
+            ray_points.append(homogeneous[:3] / homogeneous[3])
+        return ray_plane_intersection(ray_points[0], ray_points[1] - ray_points[0],
+                                      plane_origin, plane_normal)
+
+    def _pick_body_at_event(self, event):
+        """Pick only sphere actors, so influence shells and trails cannot intercept a drag."""
+        if self.engine is None or not hasattr(self, "scene"):
+            return None
+        x, y = self._event_display_xy(event)
+        picker = vtk.vtkCellPicker()
+        picker.SetTolerance(0.018)
+        picker.PickFromListOn()
+        for actor in self.scene.body_actors:
+            picker.AddPickList(actor)
+        if not picker.Pick(x, y, 0.0, self.scene.renderer):
+            return None
+        picked = picker.GetActor()
+        if picked is None:
+            return None
+        picked_address = picked.GetAddressAsString("")
+        for index, actor in enumerate(self.scene.body_actors):
+            if actor.GetAddressAsString("") == picked_address and bool(self.engine.alive[index]):
+                return index
+        return None
+
+    def _on_vtk_left_press(self, event):
+        if not self.move_bodies_var.get():
+            self._vtk_mouse(event, "LeftButtonPressEvent")
+            return
+        index = self._pick_body_at_event(event)
+        if index is None:
+            # Empty-space drags still rotate the camera, even with placement mode on.
+            self._vtk_mouse(event, "LeftButtonPressEvent")
+            return
+        self.vtk_canvas.focus_set()
+        camera = self.scene.renderer.GetActiveCamera()
+        normal = np.asarray(camera.GetDirectionOfProjection(), dtype=float)
+        normal /= max(float(np.linalg.norm(normal)), 1e-15)
+        origin = np.asarray(self.engine.pos[index], dtype=float).copy()
+        x, y = self._event_display_xy(event)
+        cursor_world = self._world_point_on_plane(x, y, origin, normal)
+        if cursor_world is None:
+            self._vtk_mouse(event, "LeftButtonPressEvent")
+            return
+        self._body_drag_state = {
+            "index": index,
+            "plane_origin": origin.copy(),
+            "normal": normal.copy(),
+            "offset": origin - cursor_world,
+            "moved": False,
+            "last_xy": (x, y),
+        }
+        self.running = False
+        self.event_var.set(f"Moving {self.body_name_vars[index].get().strip() or f'Body {index + 1}'} — drag to position, scroll to change depth.")
+        self._update_status()
+        return "break"
+
+    def _move_dragged_body_to_cursor(self, event):
+        state = self._body_drag_state
+        if state is None or self.engine is None:
+            return
+        index = state["index"]
+        x, y = self._event_display_xy(event)
+        cursor_world = self._world_point_on_plane(x, y, state["plane_origin"], state["normal"])
+        if cursor_world is None:
+            return
+        target = cursor_world + state["offset"]
+        if not np.all(np.isfinite(target)):
+            return
+        last_x, last_y = state["last_xy"]
+        if abs(x - last_x) + abs(y - last_y) > 0.5:
+            state["moved"] = True
+        state["last_xy"] = (x, y)
+        self.engine.pos[index] = target
+        for axis, value in enumerate(target):
+            self.body_vars[index][2 + axis].set(_fmt(value))
+        self.scene.update(self.engine, force_field=False)
+        self.scene.render()
+        self._dirty = False
+
+    def _on_vtk_left_motion(self, event):
+        if self._body_drag_state is not None:
+            self._move_dragged_body_to_cursor(event)
+            return "break"
+        self._vtk_mouse(event, "MouseMoveEvent")
+
+    def _on_vtk_left_release(self, event):
+        state = self._body_drag_state
+        if state is None:
+            self._vtk_mouse(event, "LeftButtonReleaseEvent")
+            return
+        self._move_dragged_body_to_cursor(event)
+        self._body_drag_state = None
+        if state["moved"]:
+            # Mark a dragged preset as a custom initial condition before rebuild.
+            self._on_body_field_edited()
+            # Rebuild from the displayed coordinates to reset t=0, diagnostics,
+            # and energy baselines without changing the user's camera angle.
+            applied = self._apply_reset(show_errors=False, fit_camera=False)
+            self.running = False
+            self.scene.reset_trails(self.engine.pos, self.trail_count)
+            self._dirty = True
+            self._render_once(force_field=True)
+            if applied:
+                index = state["index"]
+                xyz = self.engine.pos[index]
+                label = self.body_name_vars[index].get().strip() or f"Body {index + 1}"
+                self.event_var.set(f"Placed {label} at ({xyz[0]:.5g}, {xyz[1]:.5g}, {xyz[2]:.5g}). Press Play to resume.")
+            else:
+                self.event_var.set("Body moved, but the setup has an invalid field. Correct the field values and press Apply values & reset.")
+            self._update_status()
+        else:
+            index = state["index"]
+            self.event_var.set(f"Selected {self.body_name_vars[index].get().strip() or f'Body {index + 1}'}; drag to move it.")
+        return "break"
+
+    def _move_dragged_body_depth(self, notches, event):
+        state = self._body_drag_state
+        if state is None or self.engine is None or not notches:
+            return False
+        step = max(float(self.scene.view_halfwidth) * 0.025, 1e-3)
+        # Positive wheel motion brings the selected body toward the viewer.
+        state["offset"] = state["offset"] - state["normal"] * step * float(notches)
+        state["moved"] = True
+        self._move_dragged_body_to_cursor(event)
+        return True
+
+    def _on_vtk_wheel_direction(self, event, direction):
+        if self._move_dragged_body_depth(direction, event):
+            return "break"
+        vtk_event = "MouseWheelForwardEvent" if direction > 0 else "MouseWheelBackwardEvent"
+        self._vtk_mouse(event, vtk_event)
+
     def _vtk_wheel(self, event):
+        if self._body_drag_state is not None:
+            notches = math.copysign(max(1, round(abs(float(event.delta)) / 120.0)), float(event.delta)) if event.delta else 0
+            if self._move_dragged_body_depth(notches, event):
+                return "break"
         self._vtk_mouse(event, "MouseWheelForwardEvent" if event.delta > 0 else "MouseWheelBackwardEvent")
 
     def _resize_vtk(self, event=None):
@@ -841,7 +1016,8 @@ class GravityLabApp:
     def _build_sidebar(self):
         side = self.side_inner
         ttk.Label(side, text="SIMULATION SETUP", style="Panel.TLabel", font=("Segoe UI", 12, "bold")).pack(anchor="w")
-        ttk.Label(side, text="Edit the bodies, then apply and reset. Drag to rotate; scroll to zoom.",
+        ttk.Label(side,
+                  text="Edit coordinates directly or enable Move bodies and drag a sphere. While dragging, scroll to adjust depth; otherwise the wheel zooms.",
                   style="Panel.TLabel", wraplength=360).pack(anchor="w", pady=(2, 8))
 
         preset_box = ttk.LabelFrame(side, text="Starting system", padding=7)
@@ -914,6 +1090,9 @@ class GravityLabApp:
                 entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
                 entry.bind("<KeyRelease>", self._on_body_field_edited)
                 entry.bind("<<Paste>>", self._on_body_field_edited)
+                entry.bind("<Return>", lambda _e, idx=i: self._place_from_coordinates(idx))
+            ttk.Button(card, text="Place from coordinates", command=lambda idx=i: self._place_from_coordinates(idx)).pack(
+                anchor="e", pady=(3, 0))
 
             ttk.Label(card, text="Velocity (vx, vy, vz)", style="Panel.TLabel").pack(anchor="w", pady=(4, 1))
             velocity_row = ttk.Frame(card, style="Panel.TFrame")
@@ -1067,6 +1246,28 @@ class GravityLabApp:
                 self.side_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
         except (tk.TclError, AttributeError):
             pass
+
+    def _place_from_coordinates(self, index):
+        """Apply exact typed X/Y/Z coordinates as the new initial state."""
+        self.move_bodies_var.set(False)
+        # The position button means exact world coordinates; centering would
+        # silently translate the coordinates the user just specified.
+        self.com_var.set(False)
+        self._body_drag_state = None
+        try:
+            self.vtk_canvas.configure(cursor="")
+        except (AttributeError, tk.TclError):
+            pass
+        applied = self._apply_reset(show_errors=True, fit_camera=True)
+        if not applied or self.engine is None:
+            return
+        self.running = False
+        label = self.body_name_vars[index].get().strip() or f"Body {index + 1}"
+        position = self.engine.pos[index]
+        self.event_var.set(
+            f"{label} set from coordinates ({position[0]:.5g}, {position[1]:.5g}, {position[2]:.5g}). Press Play to resume."
+        )
+        self._update_status()
 
     def _unit_changed(self):
         self.G_var.set(_fmt(G_AU_MSUN_YR if self.units_var.get() == ASTRO else 1.0))
@@ -1318,7 +1519,7 @@ class GravityLabApp:
                 var.set(_fmt(value))
         self._apply_reset(show_errors=False)
 
-    def _apply_reset(self, show_errors=True):
+    def _apply_reset(self, show_errors=True, fit_camera=True):
         try:
             p = self._read_inputs()
             if (p["enable_1pn"] or p["tidal_damping"] > 0.0) and self.integrator_var.get() != RK45:
@@ -1333,7 +1534,7 @@ class GravityLabApp:
         except (ValueError, TypeError) as exc:
             if show_errors:
                 messagebox.showerror("Invalid simulation values", str(exc), parent=self.root)
-            return
+            return False
         self.engine = engine
         if self.preset_var.get() == CUSTOM_PRESET or self._custom_model_active:
             self._custom_model_active = True
@@ -1376,7 +1577,10 @@ class GravityLabApp:
                                        show_acceleration=self.accel_var.get(), zone_mode=self.zone_mode_var.get(),
                                        threshold=self.threshold)
         self.scene.reset_trails(self.engine.pos, self.trail_count)
-        self.scene.fit_camera(self.engine, view_halfwidth=self.fixed_view, include_shells=self.shells_var.get())
+        if fit_camera:
+            self.scene.fit_camera(self.engine, view_halfwidth=self.fixed_view, include_shells=self.shells_var.get())
+        else:
+            self.scene.renderer.ResetCameraClippingRange()
         self.scene.update(self.engine, force_field=True)
         self._update_metrics()
         self._last_event_seen = len(self.engine.events)
@@ -1385,6 +1589,7 @@ class GravityLabApp:
         self._dirty = False
         self._render_once(force_field=True)
         self._update_status()
+        return True
 
     def _update_metrics(self):
         if self.engine is None:

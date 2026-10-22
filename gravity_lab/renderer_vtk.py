@@ -92,6 +92,28 @@ def _set_segments(poly, segments):
     poly.Modified()
 
 
+def ray_plane_intersection(ray_origin, ray_direction, plane_origin, plane_normal, epsilon=1e-12):
+    """Return the ray/plane intersection in world coordinates, or None if parallel.
+
+    This small geometry helper is also used by the GUI's direct body-placement
+    tool, which projects mouse motion onto a camera-facing plane.
+    """
+    ray_origin = np.asarray(ray_origin, dtype=float).reshape(3)
+    ray_direction = np.asarray(ray_direction, dtype=float).reshape(3)
+    plane_origin = np.asarray(plane_origin, dtype=float).reshape(3)
+    plane_normal = np.asarray(plane_normal, dtype=float).reshape(3)
+    normal_length = float(np.linalg.norm(plane_normal))
+    if not np.isfinite(normal_length) or normal_length <= epsilon:
+        return None
+    plane_normal = plane_normal / normal_length
+    denominator = float(np.dot(ray_direction, plane_normal))
+    if not np.isfinite(denominator) or abs(denominator) <= epsilon:
+        return None
+    t = float(np.dot(plane_origin - ray_origin, plane_normal) / denominator)
+    point = ray_origin + t * ray_direction
+    return point if np.all(np.isfinite(point)) else None
+
+
 def _nice_tick_step(extent):
     """Readable 1-2-5 tick spacing for the current symmetric world extent."""
     raw = max(float(extent) / 5.0, 1e-6)
