@@ -108,7 +108,7 @@ def main(argv=None):
         return 0
     try:
         import tkinter as tk
-        from gravity_lab.gui import GravityLabApp
+        from gravity_lab.ui.main_window import GravityLabApp
     except Exception as exc:
         print("GUI startup failed. Install the requirements in requirements.txt.\n" + str(exc), file=sys.stderr)
         return 1

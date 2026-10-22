@@ -37,17 +37,32 @@ Baseline used: the frozen pre-drag `Gravity_Lab_3D_GUI_Customization_Update` pro
 - Headless PNG snapshot: passed; see `validation/updated-scene-snapshot.png`.
 - A GUI screenshot from the smoke test is saved as `validation/improved_gui_smoke.png`; this is a Linux/Xvfb smoke, not a manual Windows interaction test.
 
-## Not changed
+## Architecture service and panel extraction increment
 
-- The live `GravityLabApp` still uses existing Tkinter variables and constructs `ThreeBodyEngine` directly. It has not yet been migrated to `SimulationState`.
-- The physics equations, integrators, collision response rules, presets, and setup JSON schema (still version 1) remain unchanged. The new axes setting is optional and backward-compatible.
-- No drag-placement feature or subsequent viewport hotfix was included.
+- Added `gravity_lab/service.py` with a GUI-independent `SimulationService`, `engine_from_state()`, and immutable `SimulationSnapshot` diagnostics. It materializes validated state, supports reset/advance/step, and tracks a validated state representation from healthy engine state.
+- Routed the live GUI reset path through `SimulationState` and `SimulationService.reset()`. The frame loop now advances via `SimulationService.advance()`; the VTK renderer and History retain temporary read access to the engine for compatibility.
+- Moved `GravityLabApp` to `gravity_lab/ui/main_window.py`; retained `gravity_lab/gui.py` as a compatibility import. `main.py` now imports the new main-window module.
+- Extracted the starting-system panel to `gravity_lab/ui/preset_panel.py`, and body-editor/physics/display/run controls to `gravity_lab/ui/settings_panel.py`. The chart component and defensive diagnostic helpers remain in `ui/diagnostics_panel.py`.
+- Added service tests for state materialization, frame advancement, immutable snapshots, inactive-body behavior and headless imports.
+- Added `docs/simulation-service-api.md`; updated the README and architecture map to reflect live data flow.
+
+## Validation for this increment
+
+- Pytest: **49 passed**.
+- Built-in physics self-checks: **41/41 passed**.
+- Python compilation: passed for the main entry point, core modules, UI modules and tests.
+- Xvfb GUI smoke: passed; verified the new main-window import, backward-compatible `gravity_lab.gui` import, extracted panels, service reset and service advancement.
+- CLI headless snapshot: passed at `t=0.1`. The runtime emitted a non-fatal `DISPLAY=:0` warning in this container, so this is not a Windows OpenGL/interactive test.
+- Baseline guardrail: no drag-placement code or viewport hotfix included.
 
 ## Remaining Phase 2 work
 
-1. Finish remaining T02 coverage with a GUI-independent test for the current setup JSON payload save/load contract.
-2. **T16:** build a narrow simulation-engine/service API that accepts validated state and returns explicit state/diagnostic snapshots without creating Tk or VTK objects.
-3. **T17–T21:** switch the app through that API, move the main-window module, extract preset/diagnostics/settings panels, and move orchestration/validation out of widget handlers in small, testable steps.
-4. Finalize architecture documentation after those boundaries are live and compare the baseline user-workflow checklist.
+1. Finish remaining T02 coverage for the existing schema-1 setup JSON payload contract and collision edge cases.
+2. Move preset activation and input validation from window methods into a GUI-independent application controller.
+3. Finish settings extraction by moving theme selection and the advanced-physics dialog behind focused UI/controller modules.
+4. Move setup JSON serialization/migration into a dedicated, versioned I/O module without breaking schema-1 files.
+5. Migrate renderer/history consumers from direct engine access to immutable snapshots where feasible.
+6. Complete diagnostics panel ownership (currently the chart component/helpers are extracted; notebook assembly/status orchestration still lives in the window).
+7. Add end-to-end acceptance checks for built-in presets, setup load/save, PNG/CSV exports, advanced physics options and native Windows startup.
 
-This increment delivers the state-model foundation plus a safer, more flexible diagnostics workspace. It does not yet complete the full service/API and UI-panel migration.
+This increment makes the state/service boundary live in the application and extracts the main-window and sidebar panel modules while preserving the legacy import and renderer compatibility. It does not claim to complete all Phase 2 work.

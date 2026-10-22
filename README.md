@@ -69,7 +69,7 @@ Select one of the equal-mass planar periodic-orbit presets to explore named fami
 
 ## Architecture and development
 
-See [`docs/architecture.md`](docs/architecture.md) for module responsibilities, the simulation loop, data flow, collision assumptions, and the staged refactor plan. The GUI-independent [`gravity_lab.state`](gravity_lab/state.py) module contains validated immutable `BodyState`, `IntegratorSettings`, `PhysicsSettings`, and `SimulationState` dataclasses; its design and invariants are described in [`docs/simulation-state-design.md`](docs/simulation-state-design.md). The model is being introduced before routing the live GUI through it so the current physics/render path stays unchanged during the first migration step.
+See [`docs/architecture.md`](docs/architecture.md) for module responsibilities, the simulation loop, data flow, collision assumptions, and the staged refactor plan. The GUI-independent [`gravity_lab.state`](gravity_lab/state.py) module contains validated immutable `BodyState`, `IntegratorSettings`, `PhysicsSettings`, and `SimulationState` dataclasses. [`gravity_lab.service`](gravity_lab/service.py) materializes the validated state into the numerical engine and returns immutable `SimulationSnapshot` diagnostics without importing Tkinter or VTK. The application window now lives in [`gravity_lab/ui/main_window.py`](gravity_lab/ui/main_window.py); preset, body-editor and settings/run controls are composed from `ui/preset_panel.py` and `ui/settings_panel.py`, while `gravity_lab/gui.py` remains as a backward-compatible import. Design details are in [`docs/simulation-state-design.md`](docs/simulation-state-design.md) and [`docs/simulation-service-api.md`](docs/simulation-service-api.md).
 
 The model mapping methods are currently in-memory boundary helpers, not a stable on-disk format. Existing setup JSON remains schema version 1 until the dedicated serialization task introduces migrations/checkpoints.
 
@@ -248,16 +248,25 @@ gravity_lab_3d/
 ├── run_gravity_lab.bat        # Windows launcher
 ├── gravity_lab/
 │   ├── physics.py              # Three-body integration and collision logic
+│   ├── state.py                # Immutable, validated application state
+│   ├── service.py              # GUI-independent state-to-engine API/snapshots
 │   ├── ephemeris.py            # JPL Horizons state-vector import
 │   ├── rebound_compare.py      # Optional REBOUND IAS15 comparison
 │   ├── fields.py               # Gravitational-field calculations
 │   ├── presets.py              # Initial conditions and unit presets
 │   ├── renderer_vtk.py         # VTK scene, geometry, camera, and snapshots
-│   ├── gui.py                  # Tkinter interface and simulation controls
+│   ├── gui.py                  # Backward-compatible GravityLabApp import
+│   ├── ui/
+│   │   ├── main_window.py      # Window, menu, lifecycle and event orchestration
+│   │   ├── preset_panel.py     # Starting-system selector
+│   │   ├── settings_panel.py   # Body editor, physics and run controls
+│   │   └── diagnostics_panel.py # Charts and finite-value diagnostics
 │   ├── themes.py               # Theme palettes
 │   └── selftest.py             # Numerical self-test suite
 ├── tests/
 │   ├── test_physics.py
+│   ├── test_simulation_state.py
+│   ├── test_simulation_service.py
 │   ├── test_ephemeris.py
 │   ├── test_renderer_axes.py
 │   ├── test_periodic_gallery.py
