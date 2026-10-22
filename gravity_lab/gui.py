@@ -24,6 +24,7 @@ from .physics import (ThreeBodyEngine, History, VERLET, YOSHIDA, RK45, INTEGRATO
 from .presets import PRESETS, PRESET_NAMES, ARBITRARY, ASTRO, engine_inputs
 from .renderer_vtk import GravityScene
 from .themes import THEMES, BODY_COLORS, BODY_NAMES
+from .ui.diagnostics_panel import SparkGraph, format_finite, minimum_active_pair_separation
 
 BODY_FIELDS = ("Mass", "Radius", "x", "y", "z", "vx", "vy", "vz")
 CUSTOM_PRESET = "Custom / Build your own"
@@ -36,83 +37,6 @@ def _fmt(value):
 def _rgba(hex_color):
     v = hex_color.lstrip("#")
     return tuple(int(v[i:i+2], 16) / 255 for i in (0, 2, 4))
-
-
-class SparkGraph(tk.Canvas):
-    """Lightweight Tk canvas chart; avoids a second live plotting backend."""
-    def __init__(self, master, title, colors, **kwargs):
-        super().__init__(master, height=148, highlightthickness=1, **kwargs)
-        self.title = title
-        self.colors = colors
-        self.data = []
-        self.labels = []
-        self.palette = THEMES["Dark"]
-
-    def set_theme(self, palette):
-        self.palette = palette
-        self.configure(background=palette["panel_bg"], highlightbackground=palette["border"])
-        self.redraw()
-
-    def set_data(self, series, labels=None, logarithmic=False):
-        self.data = [np.asarray(list(s), dtype=float) for s in series]
-        self.labels = labels or []
-        self.logarithmic = logarithmic
-        self.redraw()
-
-    def redraw(self):
-        self.delete("all")
-        w, h = max(self.winfo_width(), 120), max(self.winfo_height(), 80)
-        p = self.palette
-        self.create_text(10, 8, text=self.title, anchor="nw", fill=p["text"], font=("Segoe UI", 9, "bold"))
-        left, right, top, bottom = 38, w - 10, 28, h - 25
-        self.create_line(left, top, left, bottom, fill=p["border"])
-        self.create_line(left, bottom, right, bottom, fill=p["border"])
-        if not self.data or max((len(a) for a in self.data), default=0) < 2:
-            self.create_text(w/2, h/2, text="Run the simulation to collect history", fill=p["muted"])
-            return
-        vals = []
-        for a in self.data:
-            clean = a[np.isfinite(a)]
-            if len(clean):
-                if getattr(self, "logarithmic", False):
-                    clean = np.log10(np.maximum(clean, 1e-16))
-                vals.extend(clean.tolist())
-        if not vals:
-            return
-        ymin, ymax = min(vals), max(vals)
-        if abs(ymax - ymin) < 1e-12:
-            ymin -= 0.5
-            ymax += 0.5
-        pad = (ymax - ymin) * 0.08
-        ymin, ymax = ymin - pad, ymax + pad
-        self.create_text(left - 5, top, text=f"{ymax:.1g}", anchor="e", fill=p["muted"], font=("Segoe UI", 7))
-        self.create_text(left - 5, bottom, text=f"{ymin:.1g}", anchor="e", fill=p["muted"], font=("Segoe UI", 7))
-        for idx, arr in enumerate(self.data):
-            if len(arr) < 2:
-                continue
-            clean = np.asarray(arr, dtype=float)
-            valid = np.isfinite(clean)
-            if getattr(self, "logarithmic", False):
-                clean = np.log10(np.maximum(clean, 1e-16))
-            n = len(clean)
-            xs = np.linspace(left, right, n)
-            ys = bottom - (clean - ymin) / (ymax - ymin) * (bottom - top)
-            coords = []
-            for x, y, ok in zip(xs, ys, valid):
-                if ok:
-                    coords.extend((float(x), float(y)))
-                elif len(coords) >= 4:
-                    self.create_line(*coords, fill=self.colors[idx % len(self.colors)], width=1.5, smooth=False)
-                    coords = []
-            if len(coords) >= 4:
-                self.create_line(*coords, fill=self.colors[idx % len(self.colors)], width=1.5, smooth=False)
-        if self.labels:
-            x = left + 4
-            for i, label in enumerate(self.labels):
-                color = self.colors[i % len(self.colors)]
-                self.create_line(x, h-10, x+12, h-10, fill=color, width=2)
-                self.create_text(x+16, h-10, text=label, anchor="w", fill=p["muted"], font=("Segoe UI", 7))
-                x += 70
 
 
 class GravityLabApp:
@@ -129,6 +53,7 @@ class GravityLabApp:
         self._frame = 0
         self._last_metric_update = 0
         self._last_event_seen = 0
+        self._last_event_signature = None
         self._last_fit_frame = 0
         self._closed = False
         self.system_metadata = {"source": "Built-in preset", "epoch": None, "names": []}
@@ -168,6 +93,7 @@ class GravityLabApp:
         self.autozoom_var = tk.BooleanVar(value=True)
         self.trail_var = tk.BooleanVar(value=True)
         self.floor_var = tk.BooleanVar(value=True)
+        self.axes_var = tk.BooleanVar(value=True)
         self.shells_var = tk.BooleanVar(value=True)
         self.field_var = tk.BooleanVar(value=True)
         self.accel_var = tk.BooleanVar(value=False)
@@ -184,8 +110,9 @@ class GravityLabApp:
         self.metric_vars = [tk.StringVar(value="g: — | escape: — | density: —") for _ in range(3)]
         self.status_var = tk.StringVar(value="Starting simulation…")
         self.event_var = tk.StringVar(value="No events yet.")
-        self.speed_label_var = tk.StringVar(value="Simulation speed: 1.0×")
+        self.speed_label_var = tk.StringVar(value="1.0×")
         self.display_scale_label_var = tk.StringVar(value="Visual body scale: 1.8×")
+        self._event_log_rendered_count = -1
 
         self._configure_style()
         self._build_ui()
@@ -208,6 +135,8 @@ class GravityLabApp:
         style.configure("Panel.TLabel", background=p["panel_bg"], foreground=p["text"], font=("Segoe UI", 9))
         style.configure("Title.TLabel", background=p["app_bg"], foreground=p["text"], font=("Segoe UI", 17, "bold"))
         style.configure("Sub.TLabel", background=p["app_bg"], foreground=p["muted"], font=("Segoe UI", 9))
+        style.configure("Section.TLabel", background=p["panel_bg"], foreground=p["muted"],
+                        font=("Segoe UI", 8, "bold"))
         style.configure("TLabelframe", background=p["panel_bg"], foreground=p["text"], bordercolor=p["border"])
         style.configure("TLabelframe.Label", background=p["panel_bg"], foreground=p["muted"], font=("Segoe UI", 9, "bold"))
         for i, color in enumerate(getattr(self, "body_colors", BODY_COLORS), start=1):
@@ -397,7 +326,7 @@ class GravityLabApp:
                            "threshold_var", "view_var", "trail_len_var", "restitution_var", "integrator_var",
                            "collision_var", "zone_mode_var")
         bool_settings = ("adaptive_var", "autozoom_var", "trail_var", "floor_var", "shells_var", "field_var",
-                         "accel_var", "com_var")
+                         "accel_var", "axes_var", "com_var")
         settings = {key.removesuffix("_var"): getattr(self, key).get() for key in string_settings}
         settings.update({key.removesuffix("_var"): bool(getattr(self, key).get()) for key in bool_settings})
         settings.update({"theme": self.theme_var.get(), "speed": float(self.speed_var.get()),
@@ -460,11 +389,14 @@ class GravityLabApp:
             }
             setting_vars.update({"adaptive": self.adaptive_var, "autozoom": self.autozoom_var,
                                  "trail": self.trail_var, "floor": self.floor_var, "shells": self.shells_var,
-                                 "field": self.field_var, "accel": self.accel_var, "com": self.com_var})
+                                 "field": self.field_var, "accel": self.accel_var, "axes": self.axes_var, "com": self.com_var})
             settings = payload.get("settings", {})
             for key, variable in setting_vars.items():
                 if key in settings:
                     variable.set(settings[key])
+            # Backward-compatible schema-1 setup files predate the axes toggle.
+            if "axes" not in settings:
+                self.axes_var.set(True)
             if settings.get("theme") in THEMES:
                 self.theme_var.set(settings["theme"])
             if settings.get("view_mode") in ("2D", "3D"):
@@ -719,22 +651,33 @@ class GravityLabApp:
         ttk.Label(header, text="GRAVITY LAB 3D", style="Title.TLabel").pack(side=tk.LEFT)
         ttk.Label(header, text="Newtonian three-body dynamics  ·  advanced corrections  ·  orbital diagnostics",
                   style="Sub.TLabel").pack(side=tk.LEFT, padx=(16, 0), pady=(6, 0))
+
         toolbar = ttk.Frame(outer, style="Panel.TFrame", padding=(8, 5))
         toolbar.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(toolbar, text="Visualizer:", style="Panel.TLabel").pack(side=tk.LEFT, padx=(0, 5))
         view_combo = ttk.Combobox(toolbar, textvariable=self.view_mode_var, values=("2D", "3D"),
                                   state="readonly", width=7)
-        view_combo.pack(side=tk.LEFT, padx=(0, 10))
+        view_combo.pack(side=tk.LEFT, padx=(0, 8))
         view_combo.bind("<<ComboboxSelected>>", lambda _e: self._apply_view_mode())
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=2)
         ttk.Button(toolbar, text="Advanced physics…", command=self._open_advanced_physics_dialog).pack(side=tk.LEFT, padx=3)
         ttk.Button(toolbar, text="Pause / Play", command=self._toggle_running).pack(side=tk.LEFT, padx=3)
-        ttk.Button(toolbar, text="Reset", command=self._apply_reset).pack(side=tk.LEFT, padx=3)
-        content = ttk.Frame(outer)
+        ttk.Button(toolbar, text="Reset simulation", command=self._apply_reset).pack(side=tk.LEFT, padx=3)
+        ttk.Button(toolbar, text="Fit view", command=self._fit_camera).pack(side=tk.LEFT, padx=3)
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=2)
+        ttk.Label(toolbar, text="Speed", style="Panel.TLabel").pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Scale(toolbar, from_=0.1, to=5.0, variable=self.speed_var, orient=tk.HORIZONTAL,
+                  length=115, command=self._on_speed).pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Label(toolbar, textvariable=self.speed_label_var, style="Panel.TLabel", width=13).pack(side=tk.LEFT)
+
+        # The horizontal sash makes the setup panel independently resizable.
+        content = ttk.Panedwindow(outer, orient=tk.HORIZONTAL)
         content.pack(fill=tk.BOTH, expand=True)
-        side_shell = ttk.Frame(content, width=420)
-        side_shell.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+        self.content_panes = content
+        side_shell = ttk.Frame(content, width=395)
         side_shell.pack_propagate(False)
-        self.side_canvas = tk.Canvas(side_shell, bg=self.palette["app_bg"], highlightthickness=0, width=412)
+        self.side_shell = side_shell
+        self.side_canvas = tk.Canvas(side_shell, bg=self.palette["app_bg"], highlightthickness=0, width=385)
         scroll = ttk.Scrollbar(side_shell, orient=tk.VERTICAL, command=self.side_canvas.yview)
         self.side_canvas.configure(yscrollcommand=scroll.set)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
@@ -747,19 +690,23 @@ class GravityLabApp:
         self._build_sidebar()
 
         main = ttk.Frame(content, style="Panel.TFrame", padding=5)
-        main.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-        # Embed a native VTK OpenGL window directly into a Tk canvas. This avoids
-        # requiring the optional libvtkRenderingTk bridge that many VTK wheels omit.
-        self.vtk_canvas = tk.Canvas(main, bg=self.palette["plot_bg"], highlightthickness=0, takefocus=1)
-        self.vtk_canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        self.main_panel = main
+        content.add(side_shell, weight=0)
+        content.add(main, weight=1)
+
+        # Vertical sash lets users trade viewport area for larger diagnostics.
+        self.main_panes = ttk.Panedwindow(main, orient=tk.VERTICAL)
+        self.main_panes.pack(fill=tk.BOTH, expand=True)
+        viewport_frame = ttk.Frame(self.main_panes, style="Panel.TFrame")
+        diagnostics_frame = ttk.Frame(self.main_panes, style="Panel.TFrame", padding=(2, 2, 2, 0))
+        self.main_panes.add(viewport_frame, weight=4)
+        self.main_panes.add(diagnostics_frame, weight=1)
+
+        # Embed the native VTK child window in its own resizable pane.
+        self.vtk_canvas = tk.Canvas(viewport_frame, bg=self.palette["plot_bg"], highlightthickness=0, takefocus=1)
+        self.vtk_canvas.pack(fill=tk.BOTH, expand=True)
         self.vtk_canvas.update_idletasks()
         self.vtk_render_window = self._new_native_render_window()
-        # IMPORTANT: Tk owns the Canvas window. VTK must create its drawable as
-        # a CHILD of that Canvas, not treat the Canvas handle as a complete
-        # pre-existing VTK window. SetParentInfo() is the embedding API. VTK's
-        # native implementations parse this string as a decimal integer, so do
-        # not use hex(parent_handle): the parse failure silently leaves ParentId
-        # unset and creates a separate top-level VTK window.
         parent_handle = self.vtk_canvas.winfo_id()
         if not hasattr(self.vtk_render_window, "SetParentInfo"):
             raise RuntimeError(
@@ -777,15 +724,59 @@ class GravityLabApp:
         self._bind_vtk_mouse_events()
         self.vtk_canvas.bind("<Configure>", self._resize_vtk)
         self.vtk_canvas.bind("<Expose>", lambda _e: self.root.after_idle(self._render_once))
-        self.graph_frame = ttk.Frame(main, style="Panel.TFrame")
-        self.graph_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(5, 0))
-        self.separation_graph = SparkGraph(self.graph_frame, "PAIR SEPARATIONS", ("#9fb3c8", "#f6bd60", "#84a59d"))
-        self.separation_graph.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 3))
-        self.energy_graph = SparkGraph(self.graph_frame, "ENERGY DRIFT |log10|", ("#c77dff",))
-        self.energy_graph.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(3, 0))
-        self.status = ttk.Label(main, textvariable=self.status_var, style="Panel.TLabel", anchor="w")
-        self.status.pack(side=tk.BOTTOM, fill=tk.X, pady=(4, 0))
+
+        self.status = ttk.Label(diagnostics_frame, textvariable=self.status_var, style="Panel.TLabel",
+                                anchor="w", justify=tk.LEFT, wraplength=1200)
+        self.status.pack(side=tk.TOP, fill=tk.X, pady=(1, 4))
+        self.status.bind("<Configure>", lambda event: self.status.configure(wraplength=max(320, event.width - 12)))
+        self.diagnostics_notebook = ttk.Notebook(diagnostics_frame)
+        self.diagnostics_notebook.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        self.graph_frame = ttk.Frame(self.diagnostics_notebook, style="Panel.TFrame")  # compatibility/theme parent
+
+        tab_specs = [
+            ("Pair separations", "PAIR SEPARATIONS", ("#9fb3c8", "#f6bd60", "#84a59d")),
+            ("Energy drift", "ENERGY DRIFT |log10|", ("#c77dff",)),
+            ("Momentum drift", "LINEAR MOMENTUM DRIFT |log10|", ("#5ea1ff",)),
+            ("Angular momentum", "ANGULAR MOMENTUM DRIFT |log10|", ("#f08b67",)),
+        ]
+        self.diagnostic_graphs = {}
+        for tab_label, title, colors in tab_specs:
+            tab = ttk.Frame(self.diagnostics_notebook, style="Panel.TFrame")
+            self.diagnostics_notebook.add(tab, text=tab_label)
+            graph = SparkGraph(tab, title, colors, height=205, background=self.palette["panel_bg"])
+            graph.pack(fill=tk.BOTH, expand=True)
+            self.diagnostic_graphs[tab_label] = graph
+        self.separation_graph = self.diagnostic_graphs["Pair separations"]
+        self.energy_graph = self.diagnostic_graphs["Energy drift"]
+        self.momentum_graph = self.diagnostic_graphs["Momentum drift"]
+        self.angular_momentum_graph = self.diagnostic_graphs["Angular momentum"]
+
+        events_tab = ttk.Frame(self.diagnostics_notebook, style="Panel.TFrame", padding=4)
+        self.diagnostics_notebook.add(events_tab, text="Collision events")
+        self.event_text = tk.Text(events_tab, height=5, wrap=tk.WORD, relief=tk.FLAT,
+                                  background=self.palette["entry_bg"], foreground=self.palette["text"],
+                                  insertbackground=self.palette["text"], font=("Consolas", 9),
+                                  borderwidth=0, padx=6, pady=5, state=tk.DISABLED)
+        event_scroll = ttk.Scrollbar(events_tab, orient=tk.VERTICAL, command=self.event_text.yview)
+        self.event_text.configure(yscrollcommand=event_scroll.set)
+        event_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.event_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._refresh_event_log()
+
+        self.root.after_idle(self._set_initial_pane_positions)
         self.apply_theme_widgets()
+
+    def _set_initial_pane_positions(self):
+        """Set useful starting sash sizes while leaving both panes user-resizable."""
+        try:
+            if self.content_panes.winfo_width() > 700:
+                self.content_panes.sashpos(0, 395)
+            height = self.main_panes.winfo_height()
+            if height > 420:
+                self.main_panes.sashpos(0, max(330, height - 245))
+            self._resize_vtk()
+        except tk.TclError:
+            pass
 
     def _new_native_render_window(self):
         """Select an OS-native render window so its drawable can live in a Tk canvas."""
@@ -885,6 +876,7 @@ class GravityLabApp:
             color_button.pack(side=tk.RIGHT)
             self.body_color_buttons.append(color_button)
 
+            ttk.Label(card, text="PHYSICAL PROPERTIES", style="Section.TLabel").pack(anchor="w", pady=(1, 2))
             mass_radius = ttk.Frame(card, style="Panel.TFrame")
             mass_radius.pack(fill=tk.X, pady=(1, 3))
             mass_group = ttk.Frame(mass_radius, style="Panel.TFrame")
@@ -903,7 +895,7 @@ class GravityLabApp:
             radius_entry.bind("<KeyRelease>", self._on_body_field_edited)
             radius_entry.bind("<<Paste>>", self._on_body_field_edited)
 
-            ttk.Label(card, text="Position (x, y, z)", style="Panel.TLabel").pack(anchor="w", pady=(4, 1))
+            ttk.Label(card, text="POSITION · X / Y / Z", style="Section.TLabel").pack(anchor="w", pady=(4, 1))
             position_row = ttk.Frame(card, style="Panel.TFrame")
             position_row.pack(fill=tk.X)
             for j, axis in enumerate(("x", "y", "z")):
@@ -915,7 +907,7 @@ class GravityLabApp:
                 entry.bind("<KeyRelease>", self._on_body_field_edited)
                 entry.bind("<<Paste>>", self._on_body_field_edited)
 
-            ttk.Label(card, text="Velocity (vx, vy, vz)", style="Panel.TLabel").pack(anchor="w", pady=(4, 1))
+            ttk.Label(card, text="VELOCITY · VX / VY / VZ", style="Section.TLabel").pack(anchor="w", pady=(4, 1))
             velocity_row = ttk.Frame(card, style="Panel.TFrame")
             velocity_row.pack(fill=tk.X)
             for j, axis in enumerate(("vx", "vy", "vz")):
@@ -957,6 +949,7 @@ class GravityLabApp:
                           ("Show 3D trajectories", self.trail_var),
                           ("Show floor-projected trails", self.floor_var),
                           ("Show gravitational influence shells", self.shells_var),
+                          ("Show coordinate axes", self.axes_var),
                           ("Show combined gravity heatmap", self.field_var),
                           ("Show acceleration vectors", self.accel_var),
                           ("Center initial system on center of mass", self.com_var)):
@@ -964,9 +957,6 @@ class GravityLabApp:
         ttk.Label(display, textvariable=self.display_scale_label_var, style="Panel.TLabel").pack(anchor="w", pady=(5, 0))
         ttk.Scale(display, from_=0.5, to=24.0, variable=self.display_scale_var, orient=tk.HORIZONTAL,
                   command=self._on_display_scale).pack(fill=tk.X)
-        ttk.Label(display, textvariable=self.speed_label_var, style="Panel.TLabel").pack(anchor="w", pady=(4, 0))
-        ttk.Scale(display, from_=0.1, to=5.0, variable=self.speed_var, orient=tk.HORIZONTAL,
-                  command=self._on_speed).pack(fill=tk.X)
 
         actions = ttk.LabelFrame(side, text="Run controls", padding=7)
         actions.pack(fill=tk.X, pady=(6, 4))
@@ -974,7 +964,7 @@ class GravityLabApp:
         ttk.Button(actions, text="Play / Pause  (Space)", command=self._toggle_running).pack(fill=tk.X, pady=2)
         row = ttk.Frame(actions, style="Panel.TFrame")
         row.pack(fill=tk.X, pady=2)
-        ttk.Button(row, text="Fit camera", command=self._fit_camera).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
+        ttk.Button(row, text="Fit view", command=self._fit_camera).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
         ttk.Button(row, text="PNG snapshot…", command=self._save_png).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 0))
         ttk.Button(actions, text="Export history as CSV…", command=self._export_csv).pack(fill=tk.X, pady=2)
         ttk.Button(actions, text="Run physics validation…", command=self._run_validation).pack(fill=tk.X, pady=2)
@@ -996,8 +986,11 @@ class GravityLabApp:
         p = self.palette
         self.root.configure(bg=p["app_bg"])
         self.side_canvas.configure(bg=p["app_bg"])
-        self.separation_graph.set_theme(p)
-        self.energy_graph.set_theme(p)
+        for graph in getattr(self, "diagnostic_graphs", {}).values():
+            graph.set_theme(p)
+        if hasattr(self, "event_text"):
+            self.event_text.configure(background=p["entry_bg"], foreground=p["text"],
+                                      insertbackground=p["text"])
         self._apply_body_colors()
         if hasattr(self, "scene"):
             self.scene.set_theme(self.theme_var.get())
@@ -1073,7 +1066,7 @@ class GravityLabApp:
         self.c_light_var.set(_fmt(C_AU_PER_YEAR if self.units_var.get() == ASTRO else 1000.0))
 
     def _on_speed(self, value):
-        self.speed_label_var.set(f"Simulation speed: {float(value):.1f}×")
+        self.speed_label_var.set(f"{float(value):.1f}×")
 
     def _on_display_scale(self, value):
         self.display_scale_label_var.set(f"Visual body scale: {float(value):.1f}× (visual only)")
@@ -1085,7 +1078,7 @@ class GravityLabApp:
         self.scene.set_display_options(
             display_scale=self.display_scale_var.get(), show_shells=self.shells_var.get(),
             show_field=self.field_var.get(), show_trails=self.trail_var.get(),
-            show_floor=self.floor_var.get(), show_acceleration=self.accel_var.get(),
+            show_floor=self.floor_var.get(), show_acceleration=self.accel_var.get(), show_axes=self.axes_var.get(),
             zone_mode=self.zone_mode_var.get(), threshold=self._safe_float(self.threshold_var.get(), 0.2))
         self._dirty = True
         if not self.running:
@@ -1365,6 +1358,7 @@ class GravityLabApp:
         self.failed = False
         self.history = History(maxlen=2200)
         self.history.push(self.engine)
+        self._update_graphs()
         self.scene.display_scale = self.display_scale_var.get()
         self.scene.set_view_mode(self.view_mode_var.get())
         self.scene.view_halfwidth = self.fixed_view
@@ -1373,14 +1367,16 @@ class GravityLabApp:
         self.scene.set_display_options(display_scale=self.display_scale_var.get(),
                                        show_shells=self.shells_var.get(), show_field=self.field_var.get(),
                                        show_trails=self.trail_var.get(), show_floor=self.floor_var.get(),
-                                       show_acceleration=self.accel_var.get(), zone_mode=self.zone_mode_var.get(),
+                                       show_acceleration=self.accel_var.get(), show_axes=self.axes_var.get(), zone_mode=self.zone_mode_var.get(),
                                        threshold=self.threshold)
         self.scene.reset_trails(self.engine.pos, self.trail_count)
         self.scene.fit_camera(self.engine, view_halfwidth=self.fixed_view, include_shells=self.shells_var.get())
         self.scene.update(self.engine, force_field=True)
         self._update_metrics()
         self._last_event_seen = len(self.engine.events)
+        self._last_event_signature = self.engine.events[-1] if self.engine.events else None
         self.event_var.set("No events yet.")
+        self._refresh_event_log()
         self.running = True
         self._dirty = False
         self._render_once(force_field=True)
@@ -1392,16 +1388,23 @@ class GravityLabApp:
         astro = self.units_var.get() == ASTRO
         for i in range(3):
             if not self.engine.alive[i]:
-                self.metric_vars[i].set("Merged / inactive")
+                name = self.body_name_vars[i].get().strip() or f"Body {i + 1}"
+                self.metric_vars[i].set(f"{name} inactive — merged or removed")
                 continue
-            g, vesc, rho = self.engine.surface_properties(i)
+            try:
+                g, vesc, rho = self.engine.surface_properties(i)
+            except (ValueError, ArithmeticError, FloatingPointError):
+                self.metric_vars[i].set("Surface properties unavailable")
+                continue
             if astro:
                 g_si = g * AU_M / YEAR_S**2
                 v_kms = vesc * AU_M / YEAR_S / 1000.0
                 rho_si = rho * MSUN_KG / AU_M**3
-                self.metric_vars[i].set(f"g={g_si:.4g} m/s²  |  vesc={v_kms:.4g} km/s  |  ρ={rho_si:.4g} kg/m³")
+                self.metric_vars[i].set(
+                    f"g={format_finite(g_si, '.4g')} m/s²  |  vesc={format_finite(v_kms, '.4g')} km/s  |  ρ={format_finite(rho_si, '.4g')} kg/m³")
             else:
-                self.metric_vars[i].set(f"g={g:.4g} L/T²  |  vesc={vesc:.4g} L/T  |  ρ={rho:.4g} M/L³")
+                self.metric_vars[i].set(
+                    f"g={format_finite(g, '.4g')} L/T²  |  vesc={format_finite(vesc, '.4g')} L/T  |  ρ={format_finite(rho, '.4g')} M/L³")
 
     def _schedule_tick(self):
         if self._closed:
@@ -1420,22 +1423,33 @@ class GravityLabApp:
                                 self.integrator_var.get(), adaptive=self.adaptive_var.get(), max_wall=0.010)
             self.scene.push_positions(self.engine.pos, self.engine.alive)
             self.history.push(self.engine)
-            if self.engine.events and len(self.engine.events) > self._last_event_seen:
-                self.event_var.set(self.engine.events[-1][1])
+            if self.engine.events and (len(self.engine.events) > self._last_event_seen
+                                        or self.engine.events[-1] != self._last_event_signature):
+                self.event_var.set(self._friendly_event(self.engine.events[-1][1]))
                 self._last_event_seen = len(self.engine.events)
+                self._last_event_signature = self.engine.events[-1]
+                self._refresh_event_log()
+                self._update_metrics()
+                self._update_graphs()
             if self.engine.impact:
                 self.running = False
-                self.event_var.set(self.engine.events[-1][1] if self.engine.events else "Impact detected.")
+                self.event_var.set(self._friendly_event(self.engine.events[-1][1]) if self.engine.events else "Impact detected.")
+                self._update_metrics()
+                self._refresh_event_log()
+                self._update_graphs()
             if not self.engine.is_healthy():
                 self.failed = True
                 self.running = False
                 self.status_var.set("Numerical instability detected. Reduce Δt or enable adaptive stepping, then reset.")
-            if self.autozoom_var.get() and self._frame - self._last_fit_frame > 50:
-                pos_extent = float(np.max(np.abs(self.engine.pos[self.engine.alive] - self.engine.center_of_mass())))
-                if pos_extent > self.scene.view_halfwidth * 0.94:
-                    self.scene.fit_camera(self.engine, view_halfwidth=max(self.scene.view_halfwidth, pos_extent * 1.3),
-                                          include_shells=self.shells_var.get())
-                    self._last_fit_frame = self._frame
+            if (self.autozoom_var.get() and self.engine.is_healthy() and np.any(self.engine.alive)
+                    and self._frame - self._last_fit_frame > 50):
+                live_pos = self.engine.pos[self.engine.alive]
+                if len(live_pos):
+                    pos_extent = float(np.max(np.abs(live_pos - self.engine.center_of_mass())))
+                    if math.isfinite(pos_extent) and pos_extent > self.scene.view_halfwidth * 0.94:
+                        self.scene.fit_camera(self.engine, view_halfwidth=max(self.scene.view_halfwidth, pos_extent * 1.3),
+                                              include_shells=self.shells_var.get())
+                        self._last_fit_frame = self._frame
             if self._frame - self._last_metric_update > 15:
                 self._update_metrics()
                 self._last_metric_update = self._frame
@@ -1449,20 +1463,64 @@ class GravityLabApp:
         self._schedule_tick()
 
     def _update_graphs(self):
-        self.separation_graph.set_data([list(x) for x in self.history.separations], labels=("1–2", "1–3", "2–3"))
-        self.energy_graph.set_data([list(self.history.energy_error)], labels=("|ΔE/E₀|",), logarithmic=True)
+        time_values = list(self.history.t)
+        names = [v.get().strip() or f"Body {i + 1}" for i, v in enumerate(self.body_name_vars)]
+        event_times = [float(t) for t, _message in self.engine.events] if self.engine is not None else []
+        unit_t = "yr" if self.units_var.get() == ASTRO else "model time"
+        self.separation_graph.set_data(
+            [list(x) for x in self.history.separations],
+            labels=(f"{names[0]}–{names[1]}", f"{names[0]}–{names[2]}", f"{names[1]}–{names[2]}"),
+            x_values=time_values, x_label=f"Time ({unit_t})", y_label="Separation", event_times=event_times)
+        self.energy_graph.set_data(
+            [list(self.history.energy_error)], labels=("|ΔE/E₀|",), logarithmic=True,
+            x_values=time_values, x_label=f"Time ({unit_t})", y_label="Relative error (log₁₀)", event_times=event_times)
+        self.momentum_graph.set_data(
+            [list(self.history.momentum_error)], labels=("ΔP/P₀",), logarithmic=True,
+            x_values=time_values, x_label=f"Time ({unit_t})", y_label="Relative error (log₁₀)", event_times=event_times)
+        self.angular_momentum_graph.set_data(
+            [list(self.history.angular_momentum_error)], labels=("ΔL/L₀",), logarithmic=True,
+            x_values=time_values, x_label=f"Time ({unit_t})", y_label="Relative error (log₁₀)", event_times=event_times)
+
+    def _friendly_event(self, message: str) -> str:
+        """Replace generic engine body indexes with user-defined body names."""
+        names = [v.get().strip() or f"Body {i + 1}" for i, v in enumerate(self.body_name_vars)]
+        return re.sub(r"Body ([1-3])", lambda match: names[int(match.group(1)) - 1], str(message))
+
+    def _refresh_event_log(self):
+        if not hasattr(self, "event_text"):
+            return
+        events = list(self.engine.events) if self.engine is not None else []
+        current_count = len(events)
+        signature = (current_count, events[-1] if events else None)
+        if signature == self._event_log_rendered_count:
+            return
+        unit_t = "yr" if self.units_var.get() == ASTRO else "T"
+        self.event_text.configure(state=tk.NORMAL)
+        self.event_text.delete("1.0", tk.END)
+        if not events:
+            self.event_text.insert(tk.END, "No collision or impact events recorded in this run.\n")
+        else:
+            for event_time, message in events[-150:]:
+                self.event_text.insert(tk.END, f"t = {format_finite(event_time, '.7g')} {unit_t}  ·  {self._friendly_event(message)}\n")
+        self.event_text.configure(state=tk.DISABLED)
+        self.event_text.see(tk.END)
+        self._event_log_rendered_count = signature
 
     def _update_status(self):
-        if not self.engine:
+        if self.engine is None:
             return
-        d = self.engine.pair_distances()
-        finite = d[np.isfinite(d)]
-        min_sep = float(np.min(finite)) if len(finite) else math.nan
-        state = "STOPPED: numerical issue" if self.failed else ("RUNNING" if self.running else ("IMPACT PAUSE" if self.engine.impact else "PAUSED"))
+        min_sep = minimum_active_pair_separation(self.engine.pos, self.engine.alive)
+        min_sep_text = format_finite(min_sep, ".4g") if min_sep is not None else "N/A (fewer than two valid active bodies)"
+        active_count = int(np.count_nonzero(self.engine.alive))
+        state = ("STOPPED: numerical issue — reduce Δt or tighten validation, then reset" if self.failed
+                 else ("RUNNING" if self.running else ("IMPACT PAUSE" if self.engine.impact else "PAUSED")))
         unit_t = "yr" if self.units_var.get() == ASTRO else "T"
+        energy = format_finite(self.engine.energy_error())
+        angmom = format_finite(self.engine.angular_momentum_error())
+        momentum = format_finite(self.engine.momentum_error())
         rk_note = ""
         if self.integrator_var.get() == RK45:
-            rk_note = (f"   | RK45 local error = {self.engine.rk45_last_error:.1e}"
+            rk_note = (f"   | RK45 local error = {format_finite(self.engine.rk45_last_error, '.1e')}"
                        f"   | accepted/rejected = {self.engine.rk45_accepted_steps}/{self.engine.rk45_rejected_steps}")
         active_physics = []
         if self.engine.enable_oblateness and np.any(np.abs(self.engine.j2) > 0): active_physics.append("J2")
@@ -1471,15 +1529,15 @@ class GravityLabApp:
         if np.any(np.linalg.norm(self.engine.spin_omega, axis=1) > 0): active_physics.append("body spin")
         ext_note = ("   |   " + "+".join(active_physics)) if active_physics else "   |   Newtonian"
         if self.engine.tidal_damping > 0:
-            ext_note += f"   |   tidal heat = {self.engine.tidal_energy_dissipated:.3e}"
+            ext_note += f"   |   tidal heat = {format_finite(self.engine.tidal_energy_dissipated, '.3e')}"
         if self.engine.enable_1pn:
             ext_note += "   |   energy diagnostic omits 1PN Hamiltonian"
         if self.engine.enable_oblateness and np.any(np.abs(self.engine.j2) > 0):
             ext_note += "   |   J2 spin-axis reaction torque omitted"
         self.status_var.set(
-            f"{state} [{self.view_mode_var.get()}]   |   t = {self.engine.t:.5g} {unit_t}   |   |ΔE/E₀| = {self.engine.energy_error():.2e}"
-            f"   |   |ΔL/L₀| = {self.engine.angular_momentum_error():.2e}   |   ΔP/P₀ = {self.engine.momentum_error():.2e}"
-            f"   |   min separation = {min_sep:.4g}{rk_note}{ext_note}")
+            f"{state} [{self.view_mode_var.get()}]  ·  t = {format_finite(self.engine.t, '.5g')} {unit_t}  ·  active bodies = {active_count}/3\n"
+            f"|ΔE/E₀| = {energy}  ·  |ΔL/L₀| = {angmom}  ·  ΔP/P₀ = {momentum}  ·  minimum separation = {min_sep_text}{rk_note}\n"
+            f"Collision mode: {self.collision_var.get()}  ·  {ext_note}")
 
     def _render_once(self, force_field=False):
         if self.engine is None or not hasattr(self, "scene"):
@@ -1537,7 +1595,8 @@ class GravityLabApp:
                                             filetypes=[("CSV file", "*.csv")])
         if not path:
             return
-        headers = ["time", "separation_1_2", "separation_1_3", "separation_2_3", "energy_error", "momentum_error"]
+        headers = ["time", "separation_1_2", "separation_1_3", "separation_2_3",
+                   "energy_error", "momentum_error", "angular_momentum_error"]
         for i in range(1, 4):
             headers.extend([f"x{i}", f"y{i}", f"z{i}", f"vx{i}", f"vy{i}", f"vz{i}"])
         try:
@@ -1548,7 +1607,8 @@ class GravityLabApp:
                     seps = [s[idx] for s in self.history.separations]
                     pos = self.history.positions[idx]
                     vel = self.history.velocities[idx]
-                    row = [t, *seps, self.history.energy_error[idx], self.history.momentum_error[idx]]
+                    row = [t, *seps, self.history.energy_error[idx], self.history.momentum_error[idx],
+                           self.history.angular_momentum_error[idx]]
                     for i in range(3):
                         row.extend((*pos[i], *vel[i]))
                     writer.writerow(row)

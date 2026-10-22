@@ -138,3 +138,21 @@ def test_spin_energy_and_angular_momentum_are_counted():
     )
     assert math.isclose(engine.angular_momentum()[2], 0.4, abs_tol=1e-12)
     assert math.isclose(engine.energy(), 0.4, abs_tol=1e-12)
+
+
+def test_history_records_angular_momentum_drift_and_keeps_missing_pairs_nonfinite():
+    from gravity_lab.physics import History, PASS
+
+    engine = ThreeBodyEngine(
+        [1.0, 1.0, 1.0], [0.01, 0.01, 0.01],
+        [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        [[0, 0, 0], [0, 1, 0], [-1, 0, 0]], G=1.0, collision=PASS,
+    )
+    history = History(maxlen=5)
+    history.push(engine)
+    assert len(history.angular_momentum_error) == 1
+    assert np.isfinite(history.angular_momentum_error[-1])
+    engine.alive[:] = [True, False, False]
+    history.push(engine)
+    assert all(np.isnan(series[-1]) for series in history.separations)
+    assert len(history.angular_momentum_error) == 2

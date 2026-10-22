@@ -119,6 +119,7 @@ class GravityScene:
         self.show_trails = True
         self.show_floor = True
         self.show_acceleration = False
+        self.show_axes = True
         self.zone_mode = ZONE_THRESH
         self.threshold = 0.2
         self.view_halfwidth = 8.0
@@ -257,15 +258,18 @@ class GravityScene:
         self.renderer.ResetCameraClippingRange()
 
     def _apply_axis_view_visibility(self):
-        """Hide Z-axis graphics in top-down 2D mode while retaining world axes in 3D."""
+        """Respect the axis toggle and hide Z-axis graphics in top-down 2D mode."""
         is_3d = self.view_mode == "3D"
-        if hasattr(self, "axis_actors"):
-            self.axis_actors[2].SetVisibility(is_3d)
-            self.axis_tick_actors[2].SetVisibility(is_3d)
-            for _sign, label in self.axis_labels[2]:
-                label.SetVisibility(is_3d)
-            for actor in self.axis_tick_label_groups[2]:
-                actor.SetVisibility(is_3d)
+        if not hasattr(self, "axis_actors"):
+            return
+        for axis_index in range(3):
+            visible = bool(self.show_axes and (axis_index < 2 or is_3d))
+            self.axis_actors[axis_index].SetVisibility(visible)
+            self.axis_tick_actors[axis_index].SetVisibility(visible)
+            for _sign, label in self.axis_labels[axis_index]:
+                label.SetVisibility(visible)
+            for actor in self.axis_tick_label_groups[axis_index]:
+                actor.SetVisibility(visible)
 
     def set_view_mode(self, mode: str):
         """Switch between a perspective 3D camera and an orthographic XY view."""
@@ -449,16 +453,18 @@ class GravityScene:
 
     def set_display_options(self, *, display_scale=None, show_shells=None, show_field=None,
                             show_trails=None, show_floor=None, show_acceleration=None,
-                            zone_mode=None, threshold=None):
+                            show_axes=None, zone_mode=None, threshold=None):
         if display_scale is not None:
             self.display_scale = max(0.1, float(display_scale))
         for attr, val in (("show_shells", show_shells), ("show_field", show_field),
                           ("show_trails", show_trails), ("show_floor", show_floor),
-                          ("show_acceleration", show_acceleration), ("zone_mode", zone_mode),
+                          ("show_acceleration", show_acceleration), ("show_axes", show_axes),
+                          ("zone_mode", zone_mode),
                           ("threshold", threshold)):
             if val is not None:
                 setattr(self, attr, val)
         self.field_actor.SetVisibility(self.show_field)
+        self._apply_axis_view_visibility()
         self._field_update_counter = 1000
 
     def reset_trails(self, positions, max_trails=1200):

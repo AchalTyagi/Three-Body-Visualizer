@@ -75,3 +75,19 @@ def test_default_light_and_dark_palettes_use_neutral_surfaces():
     assert THEMES["Dark"]["panel_bg"] == "#292a2d"
     assert THEMES["Light"]["app_bg"] == "#f8f9fa"
     assert THEMES["Light"]["panel_bg"] == "#ffffff"
+
+
+def test_coordinate_axes_can_be_hidden_and_restored_with_display_options():
+    window = vtk.vtkRenderWindow()
+    window.SetOffScreenRendering(1)
+    scene = GravityScene(window, grid_size=7)
+    scene.set_display_options(show_axes=False)
+    assert all(actor.GetVisibility() == 0 for actor in scene.axis_actors)
+    assert all(actor.GetVisibility() == 0 for actor in scene.axis_tick_actors)
+    scene.set_display_options(show_axes=True)
+    assert all(actor.GetVisibility() == 1 for actor in scene.axis_actors)
+    scene.set_view_mode("2D")
+    assert scene.axis_actors[0].GetVisibility() == 1
+    assert scene.axis_actors[1].GetVisibility() == 1
+    assert scene.axis_actors[2].GetVisibility() == 0
+    window.Finalize()

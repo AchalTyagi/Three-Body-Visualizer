@@ -815,6 +815,7 @@ class History:
         self.separations = [deque(maxlen=maxlen) for _ in PAIRS]
         self.energy_error = deque(maxlen=maxlen)
         self.momentum_error = deque(maxlen=maxlen)
+        self.angular_momentum_error = deque(maxlen=maxlen)
         self.positions = deque(maxlen=maxlen)
         self.velocities = deque(maxlen=maxlen)
 
@@ -822,7 +823,11 @@ class History:
         self.t.append(engine.t)
         for series, d in zip(self.separations, engine.pair_distances()):
             series.append(float(d))
-        self.energy_error.append(max(engine.energy_error(), 1e-16))
-        self.momentum_error.append(max(engine.momentum_error(), 1e-16))
+        energy_error = float(engine.energy_error())
+        momentum_error = float(engine.momentum_error())
+        angular_error = float(engine.angular_momentum_error())
+        self.energy_error.append(energy_error if math.isfinite(energy_error) else math.nan)
+        self.momentum_error.append(momentum_error if math.isfinite(momentum_error) else math.nan)
+        self.angular_momentum_error.append(angular_error if math.isfinite(angular_error) else math.nan)
         self.positions.append(tuple(tuple(float(x) for x in row) for row in engine.pos))
         self.velocities.append(tuple(tuple(float(x) for x in row) for row in engine.vel))

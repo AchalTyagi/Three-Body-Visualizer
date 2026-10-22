@@ -7,7 +7,8 @@ This document records the selected pre-drag baseline before structural changes. 
 | File | Responsibility | Architectural note |
 |---|---|---|
 | `main.py` | CLI, optional self-test, preset listing, headless PNG snapshot and GUI entry point | Entry-point responsibilities; should remain thin. |
-| `gravity_lab/gui.py` | `GravityLabApp`, `SparkGraph`, Tk widgets, menus, input parsing/validation, preset/custom model setup, JSON I/O, JPL import, REBOUND comparison, reset/orchestration, update scheduler, plots/status and rendering triggers | Current 1,584-line concentration of presentation and application-service responsibilities. |
+| `gravity_lab/gui.py` | `GravityLabApp`, menus, input parsing/validation, preset/custom model setup, JSON I/O, JPL import, REBOUND comparison, reset/orchestration, update scheduler, status and rendering triggers | Still owns too many application responsibilities; later Phase 2 tasks will extract panels and service orchestration. |
+| `gravity_lab/ui/diagnostics_panel.py` | Reusable Tk Canvas time-series chart, axis/event markers, hover sample details, finite-value formatting and active-pair minimum-separation helper | First extracted presentation component; does not own the engine or VTK renderer. |
 | `gravity_lab/physics.py` | `ThreeBodyEngine`, force calculations, Verlet/Yoshida/RK45 integration, collision/contact handling, diagnostics and `History` | Engine is mutable; the GUI currently reaches into engine arrays and metrics. |
 | `gravity_lab/renderer_vtk.py` | VTK body/shell/trail/field actors, axes, camera, view mode and render updates | Rendering receives the engine object directly; must not take ownership of physics rules. |
 | `gravity_lab/presets.py` | Built-in initial-condition records, periodic-orbit seeds, preset names and `engine_inputs()` conversion | Preset records are dictionaries and currently have no formal metadata schema/checksum. |
@@ -31,7 +32,7 @@ This document records the selected pre-drag baseline before structural changes. 
 3. Preset or body/settings edits populate `StringVar`/`BooleanVar` values. The user invokes Apply/Reset (or chooses a preset); `_read_inputs()` parses and validates the widget values and optionally recenters them around the center of mass.
 4. `_apply_reset()` constructs a new `ThreeBodyEngine`, takes an initial snapshot, resets rolling `History`, configures `GravityScene`, places initial trails and updates diagnostics.
 5. `_schedule_tick()` calls `_tick()` repeatedly. When running, `_tick()` computes the frame's step budget and calls the engine. It pushes diagnostics/history, marks the view dirty, updates status/plots on their cadence, then calls `_render_once()` as needed.
-6. `GravityScene.update()` reads engine positions/alive state and updates VTK actors and visualization layers. Tk graphs draw energy drift and pair separations from `History`.
+6. `GravityScene.update()` reads engine positions/alive state and updates VTK actors and visualization layers. The diagnostics notebook displays pair separations, energy drift, linear-momentum drift, angular-momentum drift and a named collision-event log. The chart component uses simulation time on the x-axis, mouse-hover sample details, and event-time markers.
 7. File handlers in `GravityLabApp` save/load schema-1 setup JSON and export PNG/CSV. The setup JSON captures initial body fields and settings, not an exact restart checkpoint.
 
 ## Current ownership and coupling concerns

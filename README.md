@@ -52,10 +52,10 @@ Select one of the equal-mass planar periodic-orbit presets to explore named fami
 - **Finite-radius collision modes:** merge, bounce with adjustable restitution, pass through, pause on impact, or a simplified two-remnant fragmentation model. Predicted contact times and swept-segment checks help prevent high-speed bodies from tunneling through each other. Fragmentation is an educational toy model, not a hydrodynamic impact solver.
 - **Gravitational influence visualization:** acceleration-threshold shells and an approximate Eggleton Roche-lobe mode.
 - **Combined gravitational-field map:** an XY slice of the total gravitational acceleration produced by the active bodies.
-- **Visual aids:** trajectory trails, floor projections, acceleration-direction vectors, adjustable visual-size exaggeration, and camera fitting.
+- **Visual aids:** trajectory trails, floor projections, acceleration-direction vectors, independently toggleable world coordinate axes, adjustable visual-size exaggeration, and a dedicated Fit View action. The viewport and sidebar can be resized with a sash; the viewport/diagnostics boundary is also resizable.
 - **Thirteen themes:** Midnight Dark, Minimal Dark, Light Minimal, Dark, Light, Solarized Light, Ocean Blue, Purple Nebula, High Contrast, Graphite, Aurora, Solar Flare, and Cyberpunk. Neutral charcoal **Dark** is now the default; **Light** uses soft off-white surfaces and subtle borders.
 - **Eighteen periodic-orbit presets:** Butterfly I–IV, Bumblebee, Moth I–III, Goggles, Dragonfly, Yarn, two Yin–Yang I branches, two Yin–Yang II branches, classic figure-eight, Euler collinear, and Lagrange equilateral.
-- **Diagnostics:** energy drift, angular-momentum drift, linear-momentum drift, minimum separation, pair-separation plots, an energy-drift plot, and RK45 accepted/rejected-step statistics.
+- **Diagnostics:** resizable diagnostic workspace with tabs for pair separations, energy drift, linear-momentum drift, angular-momentum drift, and collision/impact events. Plots show simulation-time axes, mouse-hover sample readouts, and vertical event markers. Non-finite/unavailable metrics display as `N/A` rather than `nan`; missing pair separations remain gaps in the plots. CSV history includes angular-momentum error.
 - **Validation tools:** GUI button to run numerical checks, plus tests for inverse-square gravity, collision tunneling, orbit closure, step-size convergence, RK45 tolerance convergence, conservation laws, and collision bookkeeping.
 - **Exports:** PNG snapshots and CSV simulation history.
 - **Astronomical preset** with AU, solar-mass, and year units and selected SI conversions for body properties.
@@ -145,7 +145,7 @@ On Windows, you can also launch `run_gravity_lab.bat` from the project folder.
 5. Click **Apply values & reset** to validate your inputs and restart the simulation. Editing a body field automatically marks the setup as custom; choose a preset again to load its original initial conditions.
 6. Choose a collision behavior and an influence-shell mode to explore different outcomes.
 7. Select a theme from **Settings → Theme**. The theme is applied immediately.
-8. Use **Play / Pause** to control the simulation, **Settings → Fit camera to system** to reframe the scene, and the **File** menu to save a PNG, export CSV history, or save/load a JSON setup. The fixed RGB axes pass through the world origin and show both negative and positive directions.
+8. Use **Play / Pause** and the top-toolbar speed slider to control the simulation, **Fit view** (or **Settings → Fit camera to system**) to reframe the scene, and the **File** menu to save a PNG, export CSV history, or save/load a JSON setup. Drag the sashes to resize the sidebar and diagnostics area. Coordinate axes can be hidden from the visual options; when enabled, the fixed RGB axes pass through the world origin and show both negative and positive directions.
 
 ### Build a custom system
 
