@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+# Keep the README's committed preview images while ignoring user-generated snapshots.
+*.png
+!docs/images/
+!docs/images/*.png

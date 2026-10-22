@@ -1,0 +1,4 @@
+# Optional dependency for independent reference comparisons.
+# Install the base requirements first, then:
+#   python -m pip install -r requirements-astro.txt
+rebound>=4.0
