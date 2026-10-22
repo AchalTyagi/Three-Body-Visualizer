@@ -45,8 +45,6 @@ Select one of the equal-mass planar periodic-orbit presets to explore named fami
 - **Switchable 2D / 3D viewport** rendered with VTK. 2D gives an orthographic top-down XY view; 3D provides mouse-driven camera rotation and zoom. The simulation physics remains 3D in either view.
 - **World-fixed RGB coordinate axes** that intersect at the world origin: X is red, Y is green, and Z is blue. Each axis has positive/negative end labels and numeric ticks on both sides of zero; a second grey cube-edge frame is deliberately omitted to avoid ambiguity.
 - **Editable bodies:** mass, physical radius, 3D position `(x, y, z)`, and velocity `(vx, vy, vz)`. Rename each body and use **Customize Body** to open the system colour picker; the selected colour updates its sphere, influence shell, and trajectory.
-- **Direct body placement:** enable **Move bodies** in the toolbar, drag a visible sphere to move it in the camera-facing plane, and scroll the mouse wheel during the drag to adjust its depth. The simulation pauses for placement and the coordinate fields stay synchronized. Turn placement mode off to return to normal camera navigation; scrolling outside a body drag still zooms.
-- **Coordinate placement:** enter exact `x`, `y`, and `z` values in a body card, then use **Place from coordinates** or press Enter from a position field. This validates and rebuilds the system at the entered initial positions; the run is left paused so the result can be inspected before continuing. Both drag placement and the exact-coordinate button turn off center-of-mass recentering so the specified world coordinates are preserved.
 - **Body-property calculations:** surface gravity, escape speed, and mean density.
 - **Exact Newtonian gravity by default:** set softening `ε = 0` to use the inverse-square force outside physical contact. Optional non-zero Plummer softening is retained for numerical experiments and changes the force law.
 - **Three numerical integrators:** Velocity Verlet (2nd order), Yoshida (4th-order symplectic for fixed steps), and error-controlled Dormand–Prince RK45.
@@ -135,10 +133,10 @@ On Windows, you can also launch `run_gravity_lab.bat` from the project folder.
 ## Quick start
 
 1. Launch the application. The **3D inclined triple (recommended)** preset is selected by default.
-2. Rotate the 3D view by dragging with the mouse and zoom using the mouse wheel. To reposition a body directly, enable **Move bodies**, drag a sphere, and scroll while dragging to change its depth.
+2. Rotate the 3D view by dragging with the mouse and zoom using the mouse wheel.
 3. Choose any built-in preset, or select **Custom / Build your own** to preserve the currently displayed body values and edit them freely.
 4. Click **＋ Build a new custom model** to populate a fresh three-body starter system. For each body, edit mass, radius, position `(x, y, z)`, and velocity `(vx, vy, vz)`.
-5. Click **Place from coordinates** under the relevant body to commit its typed X/Y/Z position (or press Enter from a position field). **Apply values & reset** validates all fields and restarts the simulation from the full setup. Editing a body field automatically marks the setup as custom; choose a preset again to load its original initial conditions.
+5. Click **Apply values & reset** to validate your inputs and restart the simulation. Editing a body field automatically marks the setup as custom; choose a preset again to load its original initial conditions.
 6. Choose a collision behavior and an influence-shell mode to explore different outcomes.
 7. Select a theme from **Settings → Theme**. The theme is applied immediately.
 8. Use **Play / Pause** to control the simulation, **Settings → Fit camera to system** to reframe the scene, and the **File** menu to save a PNG, export CSV history, or save/load a JSON setup. The fixed RGB axes pass through the world origin and show both negative and positive directions.
@@ -146,8 +144,6 @@ On Windows, you can also launch `run_gravity_lab.bat` from the project folder.
 ### Build a custom system
 
 The model selector includes **Custom / Build your own**. Selecting it preserves the current values so you can adapt a preset without losing your edits. Use **＋ Build a new custom model** when you want to start from an example configuration. The model continues to use exactly three bodies; masses and radii must be positive, and all coordinates and velocity components must be finite numbers. Use **File → Save setup to JSON…** to store your initial conditions and settings, and **File → Load setup from JSON…** to restore them later.
-
-For viewport placement, pause and enable **Move bodies**. Drag the center of a body sphere to reposition it; the drag uses a camera-facing plane. Scroll while dragging to move along the view direction (depth). Releasing a moved body rebuilds the initial state at time zero and leaves the simulation paused. For exact placement, edit the coordinate fields and click **Place from coordinates** or press Enter. Position values are in the currently selected model units.
 
 ### Keyboard shortcuts
 
