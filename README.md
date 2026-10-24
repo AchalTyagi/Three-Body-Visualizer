@@ -333,3 +333,9 @@ Generate reproducible local performance measurements with `python benchmarks/run
 - See [`docs/phase4-product-polish.md`](docs/phase4-product-polish.md) for scope, validation, and remaining Phase 4 work.
 - Keyboard shortcuts and configuration locations are documented in [`docs/keyboard-shortcuts.md`](docs/keyboard-shortcuts.md).
 - GitHub Actions runs the test suite on Linux, Windows and macOS (with Python 3.10/3.12 coverage on Linux).
+
+## Phase 5 — Reference frames and orbital analysis
+
+The Reference selector now includes **Barycentric frame** in addition to the inertial frame and each named body. The barycentric view subtracts the center-of-mass position and velocity of the currently active bodies; it is a translating, non-rotating frame. Selecting a body subtracts that body's position, velocity, and acceleration from the displayed state. These are visualization transforms only: the integrator continues to evolve the original physical state.
+
+The existing trail system records the displayed coordinates, so changing the reference frame resets trails and begins a fresh relative trajectory in that frame. The status panel reports each active pair's current separation, relative speed, and closest sampled approach/time for the current run. Closest approach is sampled at simulation updates, not continuously between integration steps, so very brief minima can fall between samples.

@@ -35,6 +35,7 @@ from ..state import BodyState, IntegratorSettings, PhysicsSettings, SimulationSt
 from ..themes import THEMES, BODY_COLORS, BODY_NAMES
 from ..preferences import load_preferences, save_preferences
 from .diagnostics_panel import SparkGraph, format_finite, minimum_active_pair_separation
+from ..orbital_analysis import barycentric_frame, pairwise_relative_metrics
 
 BODY_FIELDS = ("Mass", "Radius", "x", "y", "z", "vx", "vy", "vz")
 CUSTOM_PRESET = "Custom / Build your own"
@@ -72,6 +73,7 @@ class GravityLabApp:
         self.system_metadata = {"source": "Built-in preset", "epoch": None, "names": []}
         self.initial_snapshot = None
         self.last_reference_report = ""
+        self._closest_approach = {}
 
         self.theme_var = tk.StringVar(value="Dark")
         self.view_mode_var = tk.StringVar(value="3D")
@@ -1602,6 +1604,7 @@ class GravityLabApp:
         self.failed = False
         self.history = History(maxlen=2200)
         self.history.push(self.engine)
+        self._closest_approach = {}
         self._update_graphs()
         self.scene.display_scale = self.display_scale_var.get()
         self._apply_body_sizes(render=False)
@@ -1801,16 +1804,33 @@ class GravityLabApp:
             ext_note += "   |   energy diagnostic omits 1PN Hamiltonian"
         if self.engine.enable_oblateness and np.any(np.abs(self.engine.j2) > 0):
             ext_note += "   |   J2 spin-axis reaction torque omitted"
+        names = self._body_names_for_camera()
+        distance_unit = "AU" if self.units_var.get() == ASTRO else "L"
+        velocity_unit = "AU/yr" if self.units_var.get() == ASTRO else "L/T"
+        relative_lines = []
+        metrics = pairwise_relative_metrics(self.engine.pos, self.engine.vel, self.engine.alive)
+        for pair, (distance, relative_speed) in metrics.items():
+            prior = self._closest_approach.get(pair)
+            if prior is None or distance < prior[0]:
+                self._closest_approach[pair] = (distance, float(self.engine.t))
+            closest, closest_time = self._closest_approach[pair]
+            relative_lines.append(
+                f"{names[pair[0]]}–{names[pair[1]]}: r={format_finite(distance, '.4g')} {distance_unit}, "
+                f"v_rel={format_finite(relative_speed, '.4g')} {velocity_unit}, "
+                f"closest={format_finite(closest, '.4g')} @ t={format_finite(closest_time, '.4g')} {unit_t}")
+        frame_name = self.reference_frame_var.get()
+        relative_summary = "\nRelative motion — " + (" | ".join(relative_lines) if relative_lines else "no active body pairs")
         self.status_var.set(
             f"{state} [{self.view_mode_var.get()}]  ·  t = {format_finite(self.engine.t, '.5g')} {unit_t}  ·  active bodies = {active_count}/3\n"
             f"|ΔE/E₀| = {energy}  ·  |ΔL/L₀| = {angmom}  ·  ΔP/P₀ = {momentum}  ·  minimum separation = {min_sep_text}{rk_note}\n"
-            f"Collision mode: {self.collision_var.get()}  ·  {ext_note}")
+            f"Frame: {frame_name}  ·  Collision mode: {self.collision_var.get()}  ·  {ext_note}"
+            f"{relative_summary}")
 
     def _body_names_for_camera(self):
         return [v.get().strip() or f"Body {i + 1}" for i, v in enumerate(self.body_name_vars)]
 
     def _selected_body_index(self, value):
-        if value in ("System center", "Inertial frame"):
+        if value in ("System center", "Inertial frame", "Barycentric frame"):
             return None
         names = self._body_names_for_camera()
         try:
@@ -1823,7 +1843,7 @@ class GravityLabApp:
             return
         names = self._body_names_for_camera()
         focus_values = ["System center", *names]
-        reference_values = ["Inertial frame", *names]
+        reference_values = ["Inertial frame", "Barycentric frame", *names]
         self.camera_focus_combo.configure(values=focus_values)
         self.reference_frame_combo.configure(values=reference_values)
         if self.camera_focus_var.get() not in focus_values:
@@ -1834,12 +1854,16 @@ class GravityLabApp:
     def _display_frame(self):
         """Return an immutable render frame expressed in the chosen body frame."""
         frame = self.simulation_service.render_frame()
-        index = self._selected_body_index(self.reference_frame_var.get())
+        selected = self.reference_frame_var.get()
+        acceleration = np.asarray(frame.accelerations())
+        if selected == "Barycentric frame":
+            pos, vel, acc = barycentric_frame(frame.pos, frame.vel, frame.m, frame.alive, acceleration)
+            return replace(frame, pos=pos, vel=vel, _acceleration=acc)
+        index = self._selected_body_index(selected)
         if index is None or not frame.alive[index]:
             return frame
         origin = np.asarray(frame.pos[index], dtype=float).copy()
         origin_velocity = np.asarray(frame.vel[index], dtype=float).copy()
-        acceleration = np.asarray(frame.accelerations())
         return replace(frame, pos=np.asarray(frame.pos) - origin,
                        vel=np.asarray(frame.vel) - origin_velocity,
                        _acceleration=acceleration - acceleration[index])
