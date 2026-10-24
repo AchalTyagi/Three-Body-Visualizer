@@ -14,9 +14,12 @@
 ## Pointer and controls
 
 - Search presets by name, family, or description using **Search presets** above the preset selector.
-- Drag inside the 3D viewport to rotate the camera; use the mouse wheel to zoom toward the cursor (works in both the 3D and 2D views). Zoom is limited to a sensible range so the view can't be lost, and touchpad scrolling zooms proportionally to the scroll distance.
+- **3D view:** drag to orbit; **Shift+drag** or middle-drag to pan (so a touchpad works); right-drag to zoom.
+- **2D view:** drag (left or middle button) to pan. The plane never rotates. Right-drag zooms.
+- The mouse wheel zooms toward the cursor in both views (touchpad scrolling zooms in proportion to the scroll distance). Zoom is limited to a sensible range so the view can't be lost.
+- **Visual size** (in each body card) sets how big a body is drawn: *True scale* (physical radius × the global Visual body scale), *Multiplier* (true scale × your value) or *Fixed radius* (an absolute radius in scene units). It is display-only: it never changes collisions, density or any physics, and it can be edited while the simulation runs. The **Body size preset** menu under *3D display* sets all three bodies at once. See [`body-size.md`](body-size.md).
 - Use **Fit View** to frame the current system without resetting its physics state.
-- Set **Focus** in the top toolbar to a body to keep it centered as it moves; mouse-wheel zoom then stays centered on that body. Choose **System center** to return to the normal camera focus.
+- Set **Focus** in the top toolbar to lock the camera to a body as it moves; your orbit angle, zoom and any pan offset are kept. Press **C** to re-centre on the body, or choose **System center** to return to the normal camera focus.
 - Set **Reference** to a body to view positions, velocities, and acceleration vectors relative to it. Choose **Inertial frame** to return to the original coordinates. This changes only the visualization, not the simulated physics.
 - Use the Settings menu to change theme and 2D/3D view.
 - Use File → Save setup to JSON to save body inputs and physics configuration; use Save exact simulation checkpoint to preserve runtime state.

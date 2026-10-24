@@ -265,6 +265,22 @@ class SimulationService:
         self._sync_state_from_engine()
         return self.snapshot()
 
+    def set_body_sizes(self, sizes) -> None:
+        """Record per-body visual sizes in the application state without touching the engine.
+
+        Sizes are presentation metadata, so changing them must not reset or
+        perturb the running simulation, but checkpoints should still save the
+        latest choice.
+        """
+        if self.state is None:
+            return
+        from dataclasses import replace
+        from .body_size import normalise_sizes
+        pairs = normalise_sizes(sizes, len(self.state.bodies), [b.name for b in self.state.bodies])
+        bodies = tuple(replace(body, size_mode=mode, size_value=value)
+                       for body, (mode, value) in zip(self.state.bodies, pairs))
+        self.state = replace(self.state, bodies=bodies)
+
     def snapshot(self) -> SimulationSnapshot:
         if self._engine is None:
             raise RuntimeError("No simulation has been configured. Call reset(state) first.")
@@ -350,6 +366,8 @@ class SimulationService:
                 j2=float(engine.j2[i]),
                 spin_axis=_vector(engine.spin_axes[i]),
                 spin_omega=_vector(engine.spin_omega[i]),
+                size_mode=old.size_mode,
+                size_value=old.size_value,
             ))
         old_physics = prior.physics
         physics = PhysicsSettings(

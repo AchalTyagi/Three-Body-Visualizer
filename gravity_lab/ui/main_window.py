@@ -22,7 +22,10 @@ from ..physics import (ThreeBodyEngine, History, VERLET, YOSHIDA, RK45, INTEGRAT
                       MERGE, BOUNCE, PASS, STOP, FRAGMENT, COLLISION_MODES, ZONE_THRESH,
                       ZONE_ROCHE, ZONE_MODES, AU_M, YEAR_S, MSUN_KG, G_AU_MSUN_YR, C_AU_PER_YEAR)
 from ..presets import PRESETS, PRESET_NAMES, ARBITRARY, ASTRO, engine_inputs
-from ..camera import MACOS_NOTCH, WINDOWS_NOTCH, follow_translation, recentre, wheel_zoom_factor, zoom_about_point
+from ..body_size import (DEFAULT_SIZE_MODE, DEFAULT_SIZE_VALUE, SIZE_FIXED, SIZE_MULTIPLIER, SIZE_TRUE, UNIT_HINTS,
+                         default_sizes, normalise_sizes, overlap_warnings, sizes_to_payload, validate_size)
+from ..camera import (DRAG_ORBIT, DRAG_PAN, DRAG_ZOOM, MACOS_NOTCH, WINDOWS_NOTCH, drag_action, drag_zoom_factor,
+                      follow_translation, pan_translation, recentre, wheel_zoom_factor, zoom_about_point)
 from ..renderer_vtk import GravityScene
 from ..service import SimulationService
 from ..application import SimulationController, state_from_inputs
@@ -118,6 +121,12 @@ class GravityLabApp:
         self.body_colors = list(BODY_COLORS)
         self.body_color_buttons = []
         self.body_cards = []
+        self.body_size_mode_vars = [tk.StringVar(value=DEFAULT_SIZE_MODE) for _ in range(3)]
+        self.body_size_value_vars = [tk.StringVar(value=_fmt(DEFAULT_SIZE_VALUE)) for _ in range(3)]
+        self.body_size_hint_vars = [tk.StringVar(value=UNIT_HINTS[DEFAULT_SIZE_MODE]) for _ in range(3)]
+        self.body_size_entries = []
+        self.size_preset_var = tk.StringVar(value=self.SIZE_PRESETS[0])
+        self._drag = None  # active mouse drag: {'action', 'x', 'y'}
         for i, name_var in enumerate(self.body_name_vars):
             name_var.trace_add("write", lambda *_args, idx=i: self._update_body_title(idx))
         self.metric_vars = [tk.StringVar(value="g: — | escape: — | density: —") for _ in range(3)]
@@ -357,7 +366,7 @@ class GravityLabApp:
             "2 — Switch to 2D XY view\n3 — Switch to 3D view\n"
             "F — Fit view to the system\nC — Re-centre the camera on the focused body\n"
             "Preset search — type a name, family or description in the Search presets field\n"
-            "Mouse drag — Rotate the 3D camera (3D mode)\nMouse wheel — Zoom toward the cursor\n"
+            "3D view: drag — rotate; Shift+drag or middle-drag — pan; right-drag — zoom\n2D view: drag — pan (the plane never rotates); right-drag — zoom\nMouse wheel — Zoom toward the cursor\nBody card → Visual size — set each body's on-screen size (display only)\n"
             "Settings → Visualizer mode — Switch between 2D XY and 3D views\n"
             "File — Import JPL Horizons data and save/export results.", parent=self.root)
 
@@ -398,6 +407,7 @@ class GravityLabApp:
             "bodies": [[var.get() for var in row] for row in self.body_vars],
             "body_names": [var.get().strip() for var in self.body_name_vars],
             "body_colors": list(self.body_colors),
+            "body_sizes": sizes_to_payload(self._current_body_sizes()),
             "settings": settings,
             "metadata": self.system_metadata,
             "saved_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -429,6 +439,8 @@ class GravityLabApp:
             ):
                 self.body_colors = [c.lower() for c in saved_colors]
                 self._apply_body_colors()
+            # Older setup files have no body_sizes key; they load with default (true-scale) sizes.
+            self._set_body_size_vars(normalise_sizes(payload.get("body_sizes"), 3))
             setting_vars = {
                 "units": self.units_var, "G": self.G_var, "dt": self.dt_var, "steps": self.steps_var,
                 "soft": self.soft_var, "rtol": self.rtol_var, "atol": self.atol_var,
@@ -540,6 +552,8 @@ class GravityLabApp:
             for i, body in enumerate(state.bodies):
                 self.body_name_vars[i].set(body.name)
                 self.body_colors[i] = body.color
+                self.body_size_mode_vars[i].set(body.size_mode)
+                self.body_size_value_vars[i].set(_fmt(body.size_value))
                 values = (body.mass, body.radius, *body.position, *body.velocity)
                 for var, value in zip(self.body_vars[i], values):
                     var.set(_fmt(value))
@@ -549,6 +563,8 @@ class GravityLabApp:
                 for var, value in zip(self.spin_omega_vars[i], body.spin_omega):
                     var.set(_fmt(value))
             self._apply_body_colors()
+            self._refresh_body_size_widgets()
+            self._apply_body_sizes(render=False)
             self._custom_model_active = True
             self.preset_var.set(CUSTOM_PRESET)
             self.preset_info_var.set("Exact simulation checkpoint loaded. The simulation is paused at the saved time.")
@@ -945,72 +961,134 @@ class GravityLabApp:
         self.vtk_canvas.bind("<Button-4>", lambda e: self._vtk_wheel(e, direction=1))
         self.vtk_canvas.bind("<Button-5>", lambda e: self._vtk_wheel(e, direction=-1))
 
+    _MOUSE_BUTTONS = {"Left": 1, "Middle": 2, "Right": 3}
+
     def _vtk_mouse(self, event, vtk_event):
+        """Route viewport mouse events.
+
+        Only *orbit* drags (left button in the 3D view) are handed to the VTK
+        trackball style.  Panning and zooming are done here so that:
+
+        * the 2D view never rotates: left/middle drag pans, right drag zooms;
+        * the 3D view can be panned with middle drag or Shift+left drag (so a
+          laptop touchpad without a middle button works), and right drag zooms
+          toward the cursor exactly like the wheel.
+
+        The decision logic is in :func:`gravity_lab.camera.drag_action`.
+        """
         try:
             self.vtk_canvas.focus_set()
-            height = max(1, self.vtk_canvas.winfo_height())
-            self.vtk_interactor.SetEventPosition(int(event.x), int(height - event.y))
-            getattr(self.vtk_interactor, vtk_event)()
-        except (AttributeError, RuntimeError):
+            if vtk_event.endswith("ButtonPressEvent"):
+                button = self._MOUSE_BUTTONS.get(vtk_event[:-len("ButtonPressEvent")])
+                state = int(getattr(event, "state", 0) or 0)
+                action = drag_action(self.view_mode_var.get(), button, shift=bool(state & 0x1), ctrl=bool(state & 0x4))
+                if action is None:
+                    self._drag = None
+                    return
+                self._drag = {"action": action, "button": button, "x": event.x, "y": event.y,
+                              "anchor": self._cursor_on_focal_plane(event.x, event.y)}
+                if action == DRAG_ORBIT:
+                    self._forward_to_vtk(event, vtk_event)
+            elif vtk_event.endswith("ButtonReleaseEvent"):
+                drag, self._drag = self._drag, None
+                if drag is not None and drag["action"] == DRAG_ORBIT:
+                    self._forward_to_vtk(event, vtk_event)
+            elif vtk_event == "MouseMoveEvent":
+                drag = self._drag
+                if drag is None:
+                    return  # plain hover: nothing for the camera to do
+                dx, dy = event.x - drag["x"], event.y - drag["y"]
+                if drag["action"] == DRAG_ORBIT:
+                    self._forward_to_vtk(event, vtk_event)
+                elif drag["action"] == DRAG_PAN:
+                    self._pan_camera(dx, dy)
+                elif drag["action"] == DRAG_ZOOM:
+                    self._zoom_camera(drag_zoom_factor(dy), drag["anchor"])
+                drag["x"], drag["y"] = event.x, event.y
+        except (AttributeError, RuntimeError, ValueError, TypeError):
             pass
 
+    def _forward_to_vtk(self, event, vtk_event):
+        height = max(1, self.vtk_canvas.winfo_height())
+        # Modifier keys are routed by drag_action; VTK must only ever see a plain orbit.
+        self.vtk_interactor.SetShiftKey(0)
+        self.vtk_interactor.SetControlKey(0)
+        self.vtk_interactor.SetEventPosition(int(event.x), int(height - event.y))
+        getattr(self.vtk_interactor, vtk_event)()
+
+    def _cursor_on_focal_plane(self, x_tk, y_tk):
+        """World point under a Tk canvas pixel, on the plane through the focal point."""
+        renderer = self.scene.renderer
+        camera = renderer.GetActiveCamera()
+        canvas_w = max(1, self.vtk_canvas.winfo_width())
+        canvas_h = max(1, self.vtk_canvas.winfo_height())
+        # Use render-window dimensions for VTK display coordinates. Tk and
+        # VTK sizes can differ slightly on Windows with display scaling.
+        rw_w, rw_h = self.vtk_render_window.GetSize()
+        rw_w, rw_h = max(1, int(rw_w)), max(1, int(rw_h))
+        x = min(max(int(round(float(x_tk) * rw_w / canvas_w)), 0), rw_w - 1)
+        y = min(max(int(round((canvas_h - 1 - float(y_tk)) * rw_h / canvas_h)), 0), rw_h - 1)
+        focal = np.asarray(camera.GetFocalPoint(), dtype=float)
+        renderer.SetWorldPoint(float(focal[0]), float(focal[1]), float(focal[2]), 1.0)
+        renderer.WorldToDisplay()
+        focal_display = renderer.GetDisplayPoint()
+        renderer.SetDisplayPoint(float(x), float(y), float(focal_display[2]))
+        renderer.DisplayToWorld()
+        world_h = np.asarray(renderer.GetWorldPoint(), dtype=float)
+        if abs(float(world_h[3])) > 1e-15:
+            return world_h[:3] / world_h[3]
+        return world_h[:3]
+
+    def _zoom_camera(self, factor, anchor):
+        """Zoom so ``anchor`` (a focal-plane world point) stays fixed on screen."""
+        renderer = self.scene.renderer
+        camera = renderer.GetActiveCamera()
+        parallel = bool(camera.GetParallelProjection())
+        new_position, new_focal, new_scale, applied = zoom_about_point(
+            camera.GetPosition(), camera.GetFocalPoint(), anchor, factor, parallel,
+            camera.GetParallelScale(), self.scene.view_halfwidth)
+        if applied == 1.0:
+            return
+        camera.SetPosition(*new_position)
+        camera.SetFocalPoint(*new_focal)
+        if parallel:
+            camera.SetParallelScale(float(new_scale))
+        renderer.ResetCameraClippingRange()
+        self._dirty = True
+        self._render_once()
+
+    def _pan_camera(self, dx_pixels, dy_pixels):
+        """Translate the camera in the view plane; orientation is never changed."""
+        renderer = self.scene.renderer
+        camera = renderer.GetActiveCamera()
+        translation = pan_translation(
+            dx_pixels, dy_pixels, self.vtk_canvas.winfo_height(), camera.GetPosition(), camera.GetFocalPoint(),
+            camera.GetViewUp(), bool(camera.GetParallelProjection()), camera.GetParallelScale(), camera.GetViewAngle())
+        if not np.any(translation):
+            return
+        camera.SetPosition(*(np.asarray(camera.GetPosition(), dtype=float) + translation))
+        camera.SetFocalPoint(*(np.asarray(camera.GetFocalPoint(), dtype=float) + translation))
+        renderer.ResetCameraClippingRange()
+        self._dirty = True
+        self._render_once()
+
     def _vtk_wheel(self, event, direction=None):
-        """Zoom at the cursor by anchoring the cursor ray to the focal plane.
+        """Zoom toward the cursor (anchored on the focal plane, not on a picked surface).
 
         Do not pick a body surface here: using a surface at a different depth
         makes the camera jump when zooming.  The focal-plane anchor gives a
         stable CAD-style zoom and works even when the cursor is over empty space.
-
-        The maths lives in :mod:`gravity_lab.camera`.  It handles the 2D
-        (parallel-projection) view, where ``Dolly`` has no visible effect and the
-        parallel scale must change instead, clamps zoom to sensible limits, and
-        scales the step by the actual wheel delta so touchpads feel smooth.
+        The maths lives in :mod:`gravity_lab.camera`; it also handles the 2D
+        (parallel-projection) view, where ``Dolly`` has no visible effect.
         """
         try:
-            renderer = self.scene.renderer
-            camera = renderer.GetActiveCamera()
-            canvas_w = max(1, self.vtk_canvas.winfo_width())
-            canvas_h = max(1, self.vtk_canvas.winfo_height())
-            # Use render-window dimensions for VTK display coordinates. Tk and
-            # VTK sizes can differ slightly on Windows with display scaling.
-            rw_w, rw_h = self.vtk_render_window.GetSize()
-            rw_w, rw_h = max(1, int(rw_w)), max(1, int(rw_h))
-            x = int(round(float(event.x) * rw_w / canvas_w))
-            y = int(round((canvas_h - 1 - float(event.y)) * rw_h / canvas_h))
-            x = min(max(x, 0), rw_w - 1)
-            y = min(max(y, 0), rw_h - 1)
-
-            focal = np.asarray(camera.GetFocalPoint(), dtype=float)
-            position = np.asarray(camera.GetPosition(), dtype=float)
-            renderer.SetWorldPoint(float(focal[0]), float(focal[1]), float(focal[2]), 1.0)
-            renderer.WorldToDisplay()
-            focal_display = renderer.GetDisplayPoint()
-            renderer.SetDisplayPoint(float(x), float(y), float(focal_display[2]))
-            renderer.DisplayToWorld()
-            world_h = np.asarray(renderer.GetWorldPoint(), dtype=float)
-            if abs(float(world_h[3])) > 1e-15:
-                cursor_world = world_h[:3] / world_h[3]
-            else:
-                cursor_world = world_h[:3]
-
             notch = MACOS_NOTCH if sys.platform == "darwin" else WINDOWS_NOTCH
             factor = wheel_zoom_factor(delta=getattr(event, "delta", None), direction=direction, notch_size=notch)
-            parallel = bool(camera.GetParallelProjection())
-            new_position, new_focal, new_scale, applied = zoom_about_point(
-                position, focal, cursor_world, factor, parallel,
-                camera.GetParallelScale(), self.scene.view_halfwidth)
-            if applied != 1.0:
-                camera.SetPosition(*new_position)
-                camera.SetFocalPoint(*new_focal)
-                if parallel:
-                    camera.SetParallelScale(float(new_scale))
-                renderer.ResetCameraClippingRange()
-                self._dirty = True
-                self._render_once()
-            return "break"
+            self._zoom_camera(factor, self._cursor_on_focal_plane(event.x, event.y))
         except (AttributeError, RuntimeError, ValueError, ZeroDivisionError, TypeError):
             # Keep mouse-wheel interaction safe if VTK is mid-resize/rebuild.
-            return "break"
+            pass
+        return "break"
 
     def _resize_vtk(self, event=None):
         if not hasattr(self, "vtk_render_window"):
@@ -1151,6 +1229,86 @@ class GravityLabApp:
         self._dirty = True
         if not self.running:
             self._render_once(force_field=True)
+
+    # ---- per-body visual size (display only; never changes the physics) ------------
+    SIZE_PRESETS = ("Custom (per body)", "Realistic (true scale)", "Exaggerated (×5)", "Uniform (equal size)")
+
+    def _current_body_sizes(self, strict=False):
+        """Return three validated (mode, value) pairs from the size widgets.
+
+        While the user is typing, an incomplete value silently keeps the last
+        valid size.  With ``strict=True`` (used when applying/resetting) an
+        invalid value raises ``ValueError`` so the usual error dialog explains it.
+        """
+        fallback = getattr(self, "_last_valid_sizes", None) or default_sizes(3)
+        sizes = []
+        for i in range(3):
+            mode = self.body_size_mode_vars[i].get()
+            name = self.body_name_vars[i].get().strip() or f"Body {i + 1}"
+            if mode == SIZE_TRUE:  # the value box is disabled and ignored in this mode
+                sizes.append((SIZE_TRUE, DEFAULT_SIZE_VALUE))
+                continue
+            try:
+                sizes.append(validate_size(mode, self.body_size_value_vars[i].get(), name))
+            except ValueError:
+                if strict:
+                    raise
+                sizes.append(fallback[i])
+        return sizes
+
+    def _set_body_size_vars(self, sizes, render=False):
+        for i, (mode, value) in enumerate(sizes):
+            self.body_size_mode_vars[i].set(mode)
+            self.body_size_value_vars[i].set(_fmt(value))
+        self.size_preset_var.set(self.SIZE_PRESETS[0])
+        self._refresh_body_size_widgets()
+        self._apply_body_sizes(render=render)
+
+    def _refresh_body_size_widgets(self):
+        for i in range(3):
+            mode = self.body_size_mode_vars[i].get()
+            hint = UNIT_HINTS.get(mode, "")
+            if mode != SIZE_TRUE:
+                try:
+                    validate_size(mode, self.body_size_value_vars[i].get())
+                except ValueError:
+                    hint = "enter a number > 0"
+            self.body_size_hint_vars[i].set(hint)
+            if i < len(self.body_size_entries):
+                self.body_size_entries[i].configure(state="disabled" if mode == SIZE_TRUE else "normal")
+
+    def _apply_body_sizes(self, render=True):
+        """Push the current sizes to the renderer and the application state, live."""
+        self._refresh_body_size_widgets()
+        sizes = self._current_body_sizes()
+        self._last_valid_sizes = list(sizes)
+        if hasattr(self, "scene"):
+            self.scene.set_body_sizes(sizes)
+        service = getattr(self, "simulation_service", None)
+        if service is not None:
+            service.set_body_sizes(sizes)
+        if render and hasattr(self, "scene") and getattr(self, "engine", None) is not None:
+            self._dirty = True
+            self._render_once()
+
+    def _on_body_size_changed(self, _index=None):
+        self._refresh_body_size_widgets()
+        self.size_preset_var.set(self.SIZE_PRESETS[0])
+        self._apply_body_sizes()
+
+    def _apply_size_preset(self):
+        choice = self.size_preset_var.get()
+        if choice == self.SIZE_PRESETS[1]:
+            sizes = default_sizes(3)
+        elif choice == self.SIZE_PRESETS[2]:
+            sizes = [(SIZE_MULTIPLIER, 5.0)] * 3
+        elif choice == self.SIZE_PRESETS[3]:
+            sizes = [(SIZE_FIXED, 0.03 * max(float(self.scene.view_halfwidth), 1.0))] * 3
+        else:
+            return
+        self._set_body_size_vars(sizes)
+        self.size_preset_var.set(choice)
+        self._apply_body_sizes()
 
     @staticmethod
     def _safe_float(text, default=0.0):
@@ -1337,6 +1495,9 @@ class GravityLabApp:
         if self.preset_var.get() not in PRESETS:
             return
         self._custom_model_active = False
+        # A preset brings its own physical scale, so per-body visual overrides from the
+        # previous system (e.g. a fixed radius in AU) would no longer make sense.
+        self._set_body_size_vars(default_sizes(3))
         p = PRESETS[self.preset_var.get()]
         self.preset_info_var.set(p.get("description", "Built-in demonstration system. Edit masses, positions, and velocities to experiment."))
         self.system_metadata = {"source": "Built-in preset", "preset": self.preset_var.get(),
@@ -1392,6 +1553,7 @@ class GravityLabApp:
                 units=self.units_var.get(),
                 integrator_method=self.integrator_var.get(),
                 adaptive=bool(self.adaptive_var.get()),
+                body_sizes=self._current_body_sizes(strict=True),
             )
             self.controller.apply_state(model_state)
             engine = self.simulation_service.engine
@@ -1434,6 +1596,7 @@ class GravityLabApp:
         self.history.push(self.engine)
         self._update_graphs()
         self.scene.display_scale = self.display_scale_var.get()
+        self._apply_body_sizes(render=False)
         self.scene.set_view_mode(self.view_mode_var.get())
         self.scene.view_halfwidth = self.fixed_view
         self.scene.threshold = self.threshold
@@ -1452,7 +1615,9 @@ class GravityLabApp:
         self._update_metrics()
         self._last_event_seen = len(self.engine.events)
         self._last_event_signature = self.engine.events[-1] if self.engine.events else None
-        self.event_var.set("No events yet.")
+        overlaps = overlap_warnings([b.name for b in model_state.bodies], [b.radius for b in model_state.bodies],
+                                    [b.position for b in model_state.bodies])
+        self.event_var.set("Warning: " + overlaps[0] if overlaps else "No events yet.")
         self._refresh_event_log()
         self.running = True
         self._dirty = False

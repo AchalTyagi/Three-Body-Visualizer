@@ -15,6 +15,7 @@ import math
 import re
 from typing import Any, Mapping, Sequence
 
+from .body_size import DEFAULT_SIZE_MODE, DEFAULT_SIZE_VALUE, validate_size
 from .physics import COLLISION_MODES, INTEGRATORS, MERGE, YOSHIDA
 
 _VECTOR_LENGTH = 3
@@ -60,6 +61,9 @@ class BodyState:
     j2: float = 0.0
     spin_axis: tuple[float, float, float] = (0.0, 0.0, 1.0)
     spin_omega: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    # Visual-only size (see gravity_lab.body_size); never affects the physics.
+    size_mode: str = DEFAULT_SIZE_MODE
+    size_value: float = DEFAULT_SIZE_VALUE
 
     def __post_init__(self) -> None:
         name = str(self.name).strip()
@@ -81,6 +85,9 @@ class BodyState:
         object.__setattr__(self, "spin_omega", _vector3(self.spin_omega, f"{name} spin angular velocity"))
         j2 = _finite_number(self.j2, f"{name} J2")
         object.__setattr__(self, "j2", j2)
+        size_mode, size_value = validate_size(self.size_mode, self.size_value, name)
+        object.__setattr__(self, "size_mode", size_mode)
+        object.__setattr__(self, "size_value", size_value)
         if not isinstance(self.active, bool):
             raise ValueError(f"{name} active flag must be a boolean.")
         if not isinstance(self.color, str) or not _HEX_COLOR.fullmatch(self.color):
@@ -223,6 +230,8 @@ class SimulationState:
                     "j2": body.j2,
                     "spin_axis": list(body.spin_axis),
                     "spin_omega": list(body.spin_omega),
+                    "size_mode": body.size_mode,
+                    "size_value": body.size_value,
                 }
                 for body in self.bodies
             ],
@@ -273,6 +282,8 @@ class SimulationState:
                     j2=item.get("j2", 0.0),
                     spin_axis=tuple(item.get("spin_axis", (0.0, 0.0, 1.0))),
                     spin_omega=tuple(item.get("spin_omega", (0.0, 0.0, 0.0))),
+                    size_mode=item.get("size_mode", DEFAULT_SIZE_MODE),
+                    size_value=item.get("size_value", DEFAULT_SIZE_VALUE),
                 )
                 for item in raw_bodies
             )

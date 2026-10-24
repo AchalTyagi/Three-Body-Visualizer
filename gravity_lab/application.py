@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Mapping, Sequence
 
+from .body_size import normalise_sizes
 from .physics import INTEGRATORS, MERGE, YOSHIDA
 from .presets import PRESETS, ARBITRARY
 from .service import SimulationService, SimulationSnapshot
@@ -57,10 +58,12 @@ def state_from_preset(
 def state_from_inputs(
     values: Mapping[str, object], *, body_names: Sequence[str], body_colors: Sequence[str],
     units: str, integrator_method: str, adaptive: bool,
+    body_sizes: Sequence[object] | None = None,
 ) -> SimulationState:
     """Validate parsed GUI values and construct the domain model outside widgets."""
     if len(body_names) != 3 or len(body_colors) != 3:
         raise ValueError("Exactly three body names and colours are required.")
+    sizes = normalise_sizes(body_sizes, 3, [str(n).strip() or f"Body {i + 1}" for i, n in enumerate(body_names)])
     try:
         bodies = tuple(BodyState(
             name=str(body_names[i]).strip() or f"Body {i + 1}",
@@ -70,6 +73,7 @@ def state_from_inputs(
             color=str(body_colors[i]), j2=float(values["j2"][i]),
             spin_axis=tuple(float(v) for v in values["spin_axes"][i]),
             spin_omega=tuple(float(v) for v in values["spin_omega"][i]),
+            size_mode=sizes[i][0], size_value=sizes[i][1],
         ) for i in range(3))
         integrator = IntegratorSettings(
             method=integrator_method, dt=float(values["dt"]),

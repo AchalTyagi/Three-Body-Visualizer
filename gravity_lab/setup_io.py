@@ -11,6 +11,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
+from .body_size import normalise_sizes
+
 FORMAT = "gravity-lab-3d-setup"
 SCHEMA_VERSION = 1
 BODY_FIELD_COUNT = 8
@@ -35,6 +37,12 @@ def validate_setup_payload(payload: object) -> dict[str, Any]:
     colors = payload.get("body_colors", [])
     if colors and (not isinstance(colors, list) or len(colors) != 3):
         raise ValueError("body_colors must contain exactly three colours when provided.")
+    # Optional and additive (no schema bump): files written before per-body
+    # visual sizes existed simply omit the key and load with default sizes.
+    sizes = payload.get("body_sizes", [])
+    if sizes and not isinstance(sizes, list):
+        raise ValueError("body_sizes must be a list of three {mode, value} objects when provided.")
+    normalise_sizes(sizes, 3, names if isinstance(names, list) else None)
     metadata = payload.get("metadata", {})
     if metadata is not None and not isinstance(metadata, dict):
         raise ValueError("Setup metadata must be an object.")

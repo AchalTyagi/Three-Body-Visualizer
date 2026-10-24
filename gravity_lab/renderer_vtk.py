@@ -9,6 +9,7 @@ import numpy as np
 import vtk
 from vtk.util.numpy_support import numpy_to_vtk, numpy_to_vtkIdTypeArray
 
+from .body_size import default_sizes, display_radius, normalise_sizes
 from .fields import field_magnitude_grid
 from .themes import THEMES, BODY_COLORS
 from .physics import ZONE_THRESH, ZONE_ROCHE
@@ -127,6 +128,7 @@ class GravityScene:
         self._frame_counter = 0
         self._history = [[], [], []]
         self.body_colors = list(BODY_COLORS)
+        self.body_sizes = default_sizes(3)
         self.max_trails = 1200
         self._field_extent = 8.0
         self._field_z = 0.0
@@ -481,6 +483,18 @@ class GravityScene:
                 if len(self._history[i]) > self.max_trails:
                     del self._history[i][0:len(self._history[i]) - self.max_trails]
 
+    def set_body_sizes(self, sizes):
+        """Set per-body visual sizes as (mode, value) pairs; physics is unaffected."""
+        self.body_sizes = normalise_sizes(sizes, 3)
+
+    def body_display_radius(self, physical_radius, index, span):
+        mode, value = self.body_sizes[index]
+        return display_radius(physical_radius, mode, value, self.display_scale, span)
+
+    def _max_display_radius(self, engine, span):
+        radii = [self.body_display_radius(float(engine.R[i]), i, span) for i in range(3) if engine.alive[i]]
+        return max(radii) if radii else 0.0
+
     def fit_camera(self, engine, view_halfwidth=None, include_shells=True):
         """Fit the complete scene about world origin so RGB axes stay fixed there."""
         active = engine.pos[engine.alive]
@@ -490,7 +504,7 @@ class GravityScene:
         # Symmetric bounds preserve the negative half of each axis and keep the
         # origin-crossing RGB axes in a stable world-coordinate frame.
         max_coord = float(np.max(np.abs(active))) if len(active) else 1.0
-        spread_from_origin = max_coord + float(np.max(engine.R)) * self.display_scale
+        spread_from_origin = max_coord + self._max_display_radius(engine, extent)
         if include_shells:
             for i in range(3):
                 if engine.alive[i]:
@@ -499,7 +513,7 @@ class GravityScene:
                         spread_from_origin = max(spread_from_origin,
                                                  float(np.max(np.abs(engine.pos[i]))) + zone_r)
         extent = max(extent, spread_from_origin * 1.12,
-                     float(np.max(engine.R)) * self.display_scale * 2, 0.5)
+                     self._max_display_radius(engine, extent) * 2, 0.5)
         self.view_halfwidth = extent
         bounds = (-extent, extent, -extent, extent, -extent, extent)
         camera = self.renderer.GetActiveCamera()
@@ -539,7 +553,7 @@ class GravityScene:
             if not alive:
                 continue
             p = engine.pos[i]
-            radius = max(float(engine.R[i]) * self.display_scale, span * 0.008)
+            radius = self.body_display_radius(float(engine.R[i]), i, span)
             self.body_actors[i].SetPosition(*p)
             j2 = float(engine.j2[i]) if getattr(engine, "enable_oblateness", False) else 0.0
             shape = min(0.35, 4.0 * abs(j2))
@@ -654,7 +668,7 @@ class GravityScene:
         writer.Write()
 
 
-def make_offscreen_snapshot(engine, path, theme="Dark", view_halfwidth=8.0, display_scale=1.8):
+def make_offscreen_snapshot(engine, path, theme="Dark", view_halfwidth=8.0, display_scale=1.8, body_sizes=None):
     # Keep the public helper backward-compatible while using the same
     # renderer-facing data boundary as the live GUI.
     from .service import SceneFrame
@@ -664,6 +678,8 @@ def make_offscreen_snapshot(engine, path, theme="Dark", view_halfwidth=8.0, disp
     window.SetOffScreenRendering(1)
     scene = GravityScene(window, theme=theme, grid_size=61)
     scene.display_scale = display_scale
+    if body_sizes is not None:
+        scene.set_body_sizes(body_sizes)
     scene.view_halfwidth = view_halfwidth
     scene.reset_trails(frame.pos, 10)
     scene.fit_camera(frame, view_halfwidth=view_halfwidth)

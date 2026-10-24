@@ -4,6 +4,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
+from ..body_size import SIZE_MODES
 from ..physics import INTEGRATORS, COLLISION_MODES, ZONE_MODES
 from ..presets import ARBITRARY, ASTRO
 
@@ -11,6 +12,7 @@ from ..presets import ARBITRARY, ASTRO
 def build_body_editor_panel(app, side) -> None:
     app.body_color_buttons = []
     app.body_cards = []
+    app.body_size_entries = []
     for i, var_row in enumerate(app.body_vars):
         card = ttk.LabelFrame(side, text=f"BODY {i + 1} · {app.body_name_vars[i].get()}",
                               style=f"Body{i+1}.TLabelframe", padding=7)
@@ -50,6 +52,21 @@ def build_body_editor_panel(app, side) -> None:
         radius_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
         radius_entry.bind("<KeyRelease>", app._on_body_field_edited)
         radius_entry.bind("<<Paste>>", app._on_body_field_edited)
+
+        ttk.Label(card, text="VISUAL SIZE · display only, never changes the physics",
+                  style="Section.TLabel").pack(anchor="w", pady=(4, 1))
+        size_row = ttk.Frame(card, style="Panel.TFrame")
+        size_row.pack(fill=tk.X)
+        size_combo = ttk.Combobox(size_row, textvariable=app.body_size_mode_vars[i], values=SIZE_MODES,
+                                  state="readonly", width=12)
+        size_combo.pack(side=tk.LEFT)
+        size_combo.bind("<<ComboboxSelected>>", lambda _e, idx=i: app._on_body_size_changed(idx))
+        size_entry = ttk.Entry(size_row, textvariable=app.body_size_value_vars[i], width=8)
+        size_entry.pack(side=tk.LEFT, padx=(6, 6))
+        size_entry.bind("<KeyRelease>", lambda _e, idx=i: app._on_body_size_changed(idx))
+        size_entry.bind("<<Paste>>", lambda _e, idx=i: app.root.after_idle(app._on_body_size_changed, idx))
+        app.body_size_entries.append(size_entry)
+        ttk.Label(size_row, textvariable=app.body_size_hint_vars[i], style="Panel.TLabel").pack(side=tk.LEFT)
 
         ttk.Label(card, text="POSITION · X / Y / Z", style="Section.TLabel").pack(anchor="w", pady=(4, 1))
         position_row = ttk.Frame(card, style="Panel.TFrame")
@@ -116,6 +133,12 @@ def build_settings_panel(app, side) -> None:
     ttk.Label(display, textvariable=app.display_scale_label_var, style="Panel.TLabel").pack(anchor="w", pady=(5, 0))
     ttk.Scale(display, from_=0.5, to=24.0, variable=app.display_scale_var, orient=tk.HORIZONTAL,
               command=app._on_display_scale).pack(fill=tk.X)
+    ttk.Label(display, text="Body size preset (sets all three bodies' visual size)",
+              style="Panel.TLabel").pack(anchor="w", pady=(6, 0))
+    preset_combo = ttk.Combobox(display, textvariable=app.size_preset_var, values=app.SIZE_PRESETS,
+                                state="readonly")
+    preset_combo.pack(fill=tk.X)
+    preset_combo.bind("<<ComboboxSelected>>", lambda _e: app._apply_size_preset())
 
     actions = ttk.LabelFrame(side, text="Run controls", padding=7)
     actions.pack(fill=tk.X, pady=(6, 4))

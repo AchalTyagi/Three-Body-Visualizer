@@ -92,3 +92,61 @@ def test_follow_translation_snaps_first_then_tracks_displacement():
     assert np.allclose(follow_translation([4, 1, 0], None, focal), [3, 0, 0])
     assert np.allclose(follow_translation([5, 2, 0], np.array([4., 1., 0.]), focal), [1, 1, 0])
     assert np.allclose(follow_translation([np.nan, 0, 0], None, focal), 0.0)
+
+
+# ---- drag routing and panning -------------------------------------------------
+from gravity_lab.camera import (DRAG_NONE, DRAG_ORBIT, DRAG_PAN, DRAG_ZOOM, drag_action,
+                                drag_zoom_factor, pan_translation)
+
+
+def test_2d_view_never_orbits():
+    # Regression: dragging in the 2D view used to rotate the plane.
+    for shift in (False, True):
+        for ctrl in (False, True):
+            assert drag_action("2D", 1, shift, ctrl) == DRAG_PAN
+    assert drag_action("2D", 2) == DRAG_PAN
+    assert drag_action("2D", 3) == DRAG_ZOOM
+    assert DRAG_ORBIT not in {drag_action("2D", b, s, c) for b in (1, 2, 3) for s in (0, 1) for c in (0, 1)}
+
+
+def test_3d_drag_routing():
+    assert drag_action("3D", 1) == DRAG_ORBIT
+    assert drag_action("3D", 1, shift=True) == DRAG_PAN   # touchpad-friendly pan
+    assert drag_action("3D", 2) == DRAG_PAN
+    assert drag_action("3D", 3) == DRAG_ZOOM
+    assert drag_action("3D", 9) == DRAG_NONE
+    assert drag_action("2d", 1) == DRAG_PAN               # case-insensitive
+
+
+def test_drag_zoom_factor_direction_and_symmetry():
+    assert drag_zoom_factor(-20) > 1.0 > drag_zoom_factor(20)
+    assert np.isclose(drag_zoom_factor(30) * drag_zoom_factor(-30), 1.0)
+    assert drag_zoom_factor(float("nan")) == 1.0
+
+
+def test_2d_pan_moves_scene_with_cursor_and_keeps_orientation():
+    pos, foc, up = np.array([0., 0., 80.]), np.zeros(3), np.array([0., 1., 0.])
+    # canvas 400 px tall, parallel scale 10 -> 20 world units / 400 px = 0.05 per px
+    t = pan_translation(100, 0, 400, pos, foc, up, True, 10.0)
+    assert np.allclose(t, [-5.0, 0.0, 0.0])           # drag right -> camera left -> scene right
+    t = pan_translation(0, 40, 400, pos, foc, up, True, 10.0)
+    assert np.allclose(t, [0.0, 2.0, 0.0])            # drag down -> camera up -> scene down
+    assert abs(t[2]) < 1e-12                          # never leaves the XY plane
+
+
+def test_perspective_pan_scales_with_distance_and_stays_in_view_plane():
+    foc = np.zeros(3)
+    up = np.array([0., 0., 1.])
+    near = pan_translation(50, 20, 500, np.array([10., 0., 0.]), foc, up, False, 1.0, 30.0)
+    far = pan_translation(50, 20, 500, np.array([20., 0., 0.]), foc, up, False, 1.0, 30.0)
+    assert np.isclose(np.linalg.norm(far), 2.0 * np.linalg.norm(near))
+    direction = (foc - np.array([10., 0., 0.]))
+    assert abs(np.dot(near, direction)) < 1e-12       # no dolly component
+
+
+def test_pan_degenerate_inputs_are_safe():
+    z = np.zeros(3)
+    assert np.allclose(pan_translation(5, 5, 100, z, z, [0, 0, 1], True, 1.0), 0.0)
+    pos = np.array([0., 0., 5.])
+    assert np.allclose(pan_translation(5, 5, 100, pos, z, [0, 0, 1], True, 1.0), 0.0)  # up parallel to view
+    assert np.allclose(pan_translation(float("nan"), 5, 100, pos, z, [0, 1, 0], True, 1.0), 0.0)

@@ -131,3 +131,74 @@ def follow_translation(target, previous_target, focal):
     if not np.all(np.isfinite(delta)):
         return np.zeros(3)
     return delta
+
+
+# ---------------------------------------------------------------------------
+# Mouse-drag routing and panning
+# ---------------------------------------------------------------------------
+DRAG_ORBIT = "orbit"   # hand the drag to the VTK trackball style (3D only)
+DRAG_PAN = "pan"       # translate the camera in the view plane
+DRAG_ZOOM = "zoom"     # vertical drag zooms
+DRAG_NONE = None
+
+# Fraction of the view zoomed per pixel of vertical right-drag.
+DRAG_ZOOM_RATE = 0.01
+
+
+def drag_action(view_mode: str, button: int, shift: bool = False, ctrl: bool = False) -> Optional[str]:
+    """Decide what a mouse drag does.
+
+    2D view (orthographic top-down XY): the plane must never rotate.
+        left / middle drag -> pan, right drag -> zoom.
+    3D view: left drag orbits; middle drag or Shift+left pans (so laptops
+        without a middle button can pan); right drag zooms.
+    """
+    is_2d = str(view_mode).strip().upper() == "2D"
+    if button == 3:
+        return DRAG_ZOOM
+    if button == 2:
+        return DRAG_PAN
+    if button == 1:
+        if is_2d or shift or ctrl:
+            return DRAG_PAN
+        return DRAG_ORBIT
+    return DRAG_NONE
+
+
+def drag_zoom_factor(dy_pixels: float, rate: float = DRAG_ZOOM_RATE) -> float:
+    """Zoom factor for a vertical drag: dragging up zooms in, down zooms out."""
+    if not math.isfinite(dy_pixels):
+        return 1.0
+    return math.exp(-float(dy_pixels) * float(rate))
+
+
+def pan_translation(dx_pixels: float, dy_pixels: float, viewport_height_pixels: float,
+                    position, focal, view_up, parallel: bool, parallel_scale: float,
+                    view_angle_degrees: float = 30.0):
+    """World-space translation to apply to *both* camera position and focal point.
+
+    A drag of (dx, dy) pixels (Tk convention: +x right, +y down) moves the scene
+    with the cursor, i.e. the camera moves the opposite way.  The scale is the
+    world distance covered by one pixel on the focal plane, so the point under
+    the cursor stays under the cursor in both projections.
+    """
+    position = np.asarray(position, dtype=float)
+    focal = np.asarray(focal, dtype=float)
+    up = np.asarray(view_up, dtype=float)
+    height = max(float(viewport_height_pixels), 1.0)
+    direction = focal - position
+    distance = float(np.linalg.norm(direction))
+    if distance < 1e-15 or not (math.isfinite(dx_pixels) and math.isfinite(dy_pixels)):
+        return np.zeros(3)
+    direction = direction / distance
+    right = np.cross(direction, up)
+    right_norm = float(np.linalg.norm(right))
+    if right_norm < 1e-12:
+        return np.zeros(3)
+    right = right / right_norm
+    true_up = np.cross(right, direction)
+    if parallel:
+        world_per_pixel = 2.0 * float(parallel_scale) / height
+    else:
+        world_per_pixel = 2.0 * distance * math.tan(math.radians(float(view_angle_degrees)) / 2.0) / height
+    return (-float(dx_pixels) * right + float(dy_pixels) * true_up) * world_per_pixel

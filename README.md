@@ -43,6 +43,7 @@ Select one of the equal-mass planar periodic-orbit presets to explore named fami
 ## Features
 
 - **Switchable 2D / 3D viewport** rendered with VTK. 2D gives an orthographic top-down XY view; 3D provides mouse-driven camera rotation and zoom. The simulation physics remains 3D in either view.
+- **Per-body visual size:** choose true scale, a multiplier, or a fixed on-screen radius for each body without touching the physics; saved in setup JSON and checkpoints. 2D view drags pan (never rotate); 3D view supports Shift+drag panning.
 - **Body-focused camera and relative reference frames:** follow one body while zooming, or render the system relative to a selected body (including relative position, velocity, and acceleration vectors) without changing the underlying simulation.
 - **World-fixed RGB coordinate axes** that intersect at the world origin: X is red, Y is green, and Z is blue. Each axis has positive/negative end labels and numeric ticks on both sides of zero; a second grey cube-edge frame is deliberately omitted to avoid ambiguity.
 - **Editable bodies:** mass, physical radius, 3D position `(x, y, z)`, and velocity `(vx, vy, vz)`. Rename each body and use **Customize Body** to open the system colour picker; the selected colour updates its sphere, influence shell, and trajectory.
@@ -256,7 +257,8 @@ gravity_lab_3d/
 │   ├── fields.py               # Gravitational-field calculations
 │   ├── presets.py              # Initial conditions and unit presets
 │   ├── renderer_vtk.py         # VTK scene, geometry, camera, and snapshots
-│   ├── camera.py               # Headless camera maths: cursor zoom, limits, follow/recentre
+│   ├── camera.py               # Headless camera maths: cursor zoom, pan, drag routing, follow/recentre
+│   ├── body_size.py            # Per-body visual size modes, validation, display radius
 │   ├── gui.py                  # Backward-compatible GravityLabApp import
 │   ├── ui/
 │   │   ├── main_window.py      # Window, menu, lifecycle and event orchestration
