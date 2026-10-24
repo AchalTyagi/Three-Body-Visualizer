@@ -11,7 +11,7 @@ from typing import Iterable
 
 import numpy as np
 
-from .physics import ThreeBodyEngine, RK45, YOSHIDA
+from .physics import ThreeBodyEngine, RK45, YOSHIDA, ZONE_THRESH, ZONE_ROCHE
 from .state import BodyState, IntegratorSettings, PhysicsSettings, SimulationState
 
 
@@ -49,6 +49,65 @@ def _minimum_active_separation(positions: np.ndarray, active: np.ndarray) -> flo
             if math.isfinite(distance):
                 distances.append(distance)
     return min(distances) if distances else None
+
+
+@dataclass(frozen=True, slots=True)
+class SceneFrame:
+    """Renderer-facing frame data; no renderer code needs the mutable engine."""
+
+    pos: np.ndarray
+    vel: np.ndarray
+    m: np.ndarray
+    R: np.ndarray
+    alive: np.ndarray
+    j2: np.ndarray
+    spin_axes: np.ndarray
+    spin_omega: np.ndarray
+    enable_oblateness: bool
+    G: float
+    softening: float
+    t: float
+    _acceleration: np.ndarray
+
+    @classmethod
+    def from_engine(cls, engine: ThreeBodyEngine) -> "SceneFrame":
+        def readonly_view(array):
+            view = np.asarray(array).view()
+            view.setflags(write=False)
+            return view
+        return cls(
+            pos=readonly_view(engine.pos), vel=readonly_view(engine.vel),
+            m=readonly_view(engine.m), R=readonly_view(engine.R),
+            alive=readonly_view(engine.alive), j2=readonly_view(engine.j2),
+            spin_axes=readonly_view(engine.spin_axes), spin_omega=readonly_view(engine.spin_omega),
+            enable_oblateness=bool(engine.enable_oblateness), G=float(engine.G),
+            softening=float(engine.softening), t=float(engine.t),
+            _acceleration=readonly_view(engine.accelerations()),
+        )
+
+    def accelerations(self) -> np.ndarray:
+        return self._acceleration
+
+    def center_of_mass(self) -> np.ndarray:
+        live_m = np.where(self.alive, self.m, 0.0)
+        return np.sum(live_m[:, None] * self.pos, axis=0) / max(float(live_m.sum()), 1e-300)
+
+    def zone_radius(self, i: int, mode: str = ZONE_THRESH, acceleration_threshold: float = 0.2) -> float:
+        if not self.alive[i]:
+            return math.nan
+        if mode == ZONE_THRESH:
+            if acceleration_threshold > 0 and self.G > 0:
+                return math.sqrt(self.G * self.m[i] / acceleration_threshold)
+            return math.nan
+        if mode == ZONE_ROCHE:
+            from .physics import roche_fraction
+            candidates = []
+            for j in range(3):
+                if i != j and self.alive[j] and self.m[j] > 0:
+                    separation = float(np.linalg.norm(self.pos[j] - self.pos[i]))
+                    candidates.append(separation * roche_fraction(self.m[i] / self.m[j]))
+            return min(candidates) if candidates else math.nan
+        raise ValueError(f"Unknown zone mode: {mode}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +250,12 @@ class SimulationService:
     def engine(self) -> ThreeBodyEngine | None:
         """Compatibility access to the live engine for existing renderer code."""
         return self._engine
+
+    def render_frame(self) -> SceneFrame:
+        """Return read-only render data instead of exposing engine ownership to VTK."""
+        if self._engine is None:
+            raise RuntimeError("No simulation has been configured. Call reset(state) first.")
+        return SceneFrame.from_engine(self._engine)
 
     def reset(self, state: SimulationState) -> SimulationSnapshot:
         """Replace the current simulation with a new validated initial state."""

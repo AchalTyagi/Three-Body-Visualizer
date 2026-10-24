@@ -91,3 +91,14 @@ def test_service_rejects_nonfinite_or_nonpositive_frame_overrides():
         service.advance(dt=float("nan"))
     with pytest.raises(ValueError, match="step count must be finite and positive"):
         service.advance(steps=0)
+
+
+def test_render_frame_is_read_only_and_contains_renderer_data():
+    service = SimulationService(sample_state())
+    frame = service.render_frame()
+    assert frame.pos.shape == (3, 3)
+    assert frame.accelerations().shape == (3, 3)
+    assert frame.zone_radius(0) > 0
+    assert frame.center_of_mass().shape == (3,)
+    with pytest.raises(ValueError):
+        frame.pos[0, 0] = 99

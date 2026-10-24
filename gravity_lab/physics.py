@@ -150,6 +150,32 @@ class ThreeBodyEngine:
     def _refresh_mask(self):
         self._ok = np.outer(self.alive, self.alive) & ~np.eye(3, dtype=bool)
 
+    def _accelerations_newtonian_pairs(self, positions: np.ndarray) -> np.ndarray:
+        """Allocation-light symmetric pair accumulation for the Newtonian model."""
+        p = positions
+        acc = np.zeros((3, 3), dtype=float)
+        for i, j in PAIRS:
+            if not (self.alive[i] and self.alive[j]):
+                continue
+            dx = float(p[j, 0] - p[i, 0])
+            dy = float(p[j, 1] - p[i, 1])
+            dz = float(p[j, 2] - p[i, 2])
+            r2 = dx * dx + dy * dy + dz * dz
+            if self.softening == 0.0 and r2 == 0.0:
+                raise FloatingPointError(
+                    "Two active point masses became coincident. Reduce the time step or enable encounter-aware stepping."
+                )
+            inv_r3 = (r2 + self.eps2) ** -1.5
+            scale_i = self.G * self.m[j] * inv_r3
+            scale_j = self.G * self.m[i] * inv_r3
+            acc[i, 0] += scale_i * dx
+            acc[i, 1] += scale_i * dy
+            acc[i, 2] += scale_i * dz
+            acc[j, 0] -= scale_j * dx
+            acc[j, 1] -= scale_j * dy
+            acc[j, 2] -= scale_j * dz
+        return acc
+
     def accelerations(self, pos=None, vel=None) -> np.ndarray:
         """Compute Newtonian gravity plus explicitly enabled correction models.
 
@@ -159,6 +185,12 @@ class ThreeBodyEngine:
         not a full equilibrium-tide/spin-orbit evolution model.
         """
         p = self.pos if pos is None else np.asarray(pos, dtype=float)
+        # The default Newtonian path is the hot loop for ordinary simulations.
+        # For three bodies, accumulating each active pair directly avoids several
+        # small broadcast/einsum temporaries per force evaluation. Keep the
+        # vectorized implementation below for advanced correction models.
+        if not (self.enable_oblateness or self.enable_1pn or self.tidal_damping > 0.0):
+            return self._accelerations_newtonian_pairs(p)
         v = self.vel if vel is None else np.asarray(vel, dtype=float)
         d_to_source = p[None, :, :] - p[:, None, :]  # target i -> source j
         dist2 = np.einsum("ijk,ijk->ij", d_to_source, d_to_source)

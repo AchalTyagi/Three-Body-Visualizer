@@ -40,3 +40,10 @@ The VTK renderer and history collector still read the engine directly during thi
 ## Inactive body slots
 
 `SimulationState` retains positive body mass/radius records for inactive slots. This avoids losing body identity and display metadata after a merge. The engine may set a removed body's mass/radius to zero internally; the service snapshot reflects those engine arrays, while the explicit state keeps a valid record with `active=False`.
+
+## Controller and persistence extensions
+
+- `SimulationController.activate_preset(name, ...)` converts a built-in preset into a validated `SimulationState` and resets the service.
+- `SimulationController.apply_inputs(values, ...)` builds and validates a state from parsed numeric form values without importing Tkinter.
+- `SimulationService.render_frame()` returns a read-only `SceneFrame` for VTK presentation. This is a renderer data adapter, not a second physics engine.
+- `save_checkpoint(service, path)` and `load_checkpoint(path)` in `gravity_lab.state_io` provide atomic, checksummed, versioned checkpoint persistence. Legacy setup JSON is intentionally a separate user-interface preference/configuration format.

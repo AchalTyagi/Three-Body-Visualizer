@@ -655,15 +655,19 @@ class GravityScene:
 
 
 def make_offscreen_snapshot(engine, path, theme="Dark", view_halfwidth=8.0, display_scale=1.8):
+    # Keep the public helper backward-compatible while using the same
+    # renderer-facing data boundary as the live GUI.
+    from .service import SceneFrame
+    frame = SceneFrame.from_engine(engine)
     window = vtk.vtkRenderWindow()
     window.SetSize(1500, 950)
     window.SetOffScreenRendering(1)
     scene = GravityScene(window, theme=theme, grid_size=61)
     scene.display_scale = display_scale
     scene.view_halfwidth = view_halfwidth
-    scene.reset_trails(engine.pos, 10)
-    scene.fit_camera(engine, view_halfwidth=view_halfwidth)
-    scene.update(engine, force_field=True)
+    scene.reset_trails(frame.pos, 10)
+    scene.fit_camera(frame, view_halfwidth=view_halfwidth)
+    scene.update(frame, force_field=True)
     scene.render()
     scene.save_png(path)
     window.Finalize()

@@ -1,0 +1,43 @@
+[PASS] Sun surface gravity — 274.21 m/s²
+[PASS] Sun escape velocity — 617.7 km/s
+[PASS] Mean density positive — model density=2.374e+06
+[PASS] Eggleton equal-mass Roche fraction — fraction=0.3789
+[PASS] Newton's third law (net force zero) — max=3.89e-16
+[PASS] Exact Newtonian inverse-square acceleration at ε=0 — a_x=1.5, expected=1.5
+[PASS] Acceleration-threshold influence radius — radius=3.536
+[PASS] Roche-lobe estimate from pair separations — radius=2.305
+[PASS] Figure-eight period / Velocity Verlet (2nd order) — position error=1.33e-05, energy drift=6.57e-11
+[PASS] Figure-eight period / Yoshida (4th order, symplectic) — position error=3.10e-08, energy drift=2.07e-15
+[PASS] Yoshida step-size convergence — coarse=2.21e-06, fine=1.68e-07
+[PASS] Dormand–Prince RK45 tolerance convergence — rtol=1e-7: 3.08e-07; rtol=1e-9: 3.76e-08
+[PASS] 3D energy conservation — drift=2.18e-13
+[PASS] 3D angular momentum conservation — drift=1.84e-15
+[PASS] 3D linear momentum conservation — drift=2.87e-15
+[PASS] Merge conserves total mass
+[PASS] Merge conserves linear momentum
+[PASS] Merge stores internal angular momentum as spin
+[PASS] Merge combines volume-equivalent radius — radius=0.32711
+[PASS] Bounce restitution 1.0 — booked energy loss=0
+[PASS] Bounce restitution 0.4 — booked energy loss=0.84
+[PASS] High-speed collision event / Velocity Verlet (2nd order) (no tunneling) — vx=(-100, 100); event=Bodies 1 and 2 bounced; normal approach speed=200
+[PASS] High-speed collision event / Dormand–Prince RK45 (adaptive) (no tunneling) — vx=(-100, 100); event=Bodies 1 and 2 bounced; normal approach speed=200
+[PASS] Elastic impact conserves linear momentum — momentum error=0.00e+00
+[PASS] Pause-on-impact collision mode — Impact: Body 1 and Body 2
+[PASS] Adaptive close-encounter integration — t=8.004, drift=3.04e-07
+[PASS] Earth orbital radius after one year — relative separation=1.00001 AU
+[PASS] Combined gravitational field map — grid=(16, 16)
+[PASS] J2 exterior model preserves translational momentum — net force=5.66e-17
+[PASS] J2 acceleration agrees with interaction-potential gradient — finite-difference error=3.96e-12
+[PASS] Pairwise 1PN correction remains momentum balanced — net force=9.97e-23
+[PASS] Pairwise 1PN uses RK45 and remains finite — accepted RK45 steps=1
+[PASS] Tidal damping records positive heat — heat=1.814e-01
+[PASS] Tidal heat closes the dissipative energy budget — energy error=7.47e-14
+[PASS] Body spin contributes to angular momentum and rotational energy — spin Lz=0.4, spin KE=0.4
+[PASS] Toy fragmentation conserves total mass and momentum — mass=3, momentum error=0.00e+00
+[PASS] Toy fragmentation transfers lost orbital angular momentum to spin — angular momentum error=0.00e+00
+[PASS] Periodic orbit gallery contains 18 named models — models=18
+[PASS] Periodic orbit seeds have equal masses and zero COM momentum — equal-mass, zero-momentum Newtonian seeds
+[PASS] Euler collinear solution closes over one period — max coordinate closure error=5.15e-11
+[PASS] Lagrange equilateral solution closes over one period — max coordinate closure error=2.98e-11
+
+41/41 checks passed

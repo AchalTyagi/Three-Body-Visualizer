@@ -1,0 +1,231 @@
+{
+  "schema_version": 1,
+  "presets": [
+    {
+      "name": "3D inclined triple (recommended)",
+      "description": "",
+      "units": "Arbitrary units",
+      "integrator": "Yoshida (4th order, symplectic)",
+      "collision_mode": "Merge (inelastic)",
+      "body_count": 3,
+      "sha256": "e5287084a123dc5ac4960cafad66ff43c602bd96889f717cb7738a3382b9c33e"
+    },
+    {
+      "name": "Binary + inclined small body (Claude)",
+      "description": "",
+      "units": "Arbitrary units",
+      "integrator": "Yoshida (4th order, symplectic)",
+      "collision_mode": "Merge (inelastic)",
+      "body_count": 3,
+      "sha256": "5a45e085764191af20a67f8668ac49b4c60288ca712a75480a9fc4e5cd33bc39"
+    },
+    {
+      "name": "Figure-eight, tilted 40 deg (Claude)",
+      "description": "",
+      "units": "Arbitrary units",
+      "integrator": "Yoshida (4th order, symplectic)",
+      "collision_mode": "Bounce",
+      "body_count": 3,
+      "sha256": "60941bcce91d3b101c557e07bae6a41854fe74cbe60d08e9420a1886e86b20e3"
+    },
+    {
+      "name": "Hierarchical triple (Claude)",
+      "description": "",
+      "units": "Arbitrary units",
+      "integrator": "Yoshida (4th order, symplectic)",
+      "collision_mode": "Merge (inelastic)",
+      "body_count": 3,
+      "sha256": "1c93a88fb89c40b4b180699afeee10859d6a7cebd9a5e0b273cfd8061a20e84f"
+    },
+    {
+      "name": "Lagrange triangle (unstable)",
+      "description": "",
+      "units": "Arbitrary units",
+      "integrator": "Yoshida (4th order, symplectic)",
+      "collision_mode": "Bounce",
+      "body_count": 3,
+      "sha256": "53ca08f969f8ab80e7ad39dc7c357f65bf430706561b1a4f8ee4cf0add6cc2e8"
+    },
+    {
+      "name": "Periodic · Bumblebee (T≈63.5345)",
+      "description": "Bumblebee · published initial-condition seed · nominal period 63.5345 time units",
+      "units": "Arbitrary units",
+      "integrator": "Dormand–Prince RK45 (adaptive)",
+      "collision_mode": "Pass through",
+      "body_count": 3,
+      "sha256": "403e8b2bbda3bca6f618bdc301bc077ac8e88c0f74b0723671d8fe4f41c2231c"
+    },
+    {
+      "name": "Periodic · Butterfly I (T≈6.2356)",
+      "description": "Butterfly I · published initial-condition seed · nominal period 6.2356 time units",
+      "units": "Arbitrary units",
+      "integrator": "Dormand–Prince RK45 (adaptive)",
+      "collision_mode": "Pass through",
+      "body_count": 3,
+      "sha256": "4bc8909443116f7320efb06618430ece74c5e5640085eb6cb0f1dd73594cf3c2"
+    },
+    {
+      "name": "Periodic · Butterfly II (T≈7.0039)",
+      "description": "Butterfly II · published initial-condition seed · nominal period 7.0039 time units",
+      "units": "Arbitrary units",
+      "integrator": "Dormand–Prince RK45 (adaptive)",
+      "collision_mode": "Pass through",
+      "body_count": 3,
+      "sha256": "f5d6eeff269620d9ccf6ce29fd84f0a89cbf13687fd66f7a41e2b7459a5e1273"
+    },
+    {
+      "name": "Periodic · Butterfly III (T≈13.8658)",
+      "description": "Butterfly III · published initial-condition seed · nominal period 13.8658 time units",
+      "units": "Arbitrary units",
+      "integrator": "Dormand–Prince RK45 (adaptive)",
+      "collision_mode": "Pass through",
+      "body_count": 3,
+      "sha256": "40889953abc2438354df9a6fbe44c784166fc87d9ae047ec9a2efefc45289696"
+    },
+    {
+      "name": "Periodic · Butterfly IV (T≈79.4759)",
+      "description": "Butterfly IV · published initial-condition seed · nominal period 79.4759 time units",
+      "units": "Arbitrary units",
+      "integrator": "Dormand–Prince RK45 (adaptive)",
+      "collision_mode": "Pass through",
+      "body_count": 3,
+      "sha256": "578f79464c50e26bad1956973bd5fdb7870cc3b99f4c1d6f1f13954b9059cb6d"
+    },
+    {
+      "name": "Periodic · Dragonfly (T≈21.2710)",
+      "description": "Dragonfly · published initial-condition seed · nominal period 21.2710 time units",
+      "units": "Arbitrary units",
+      "integrator": "Dormand–Prince RK45 (adaptive)",
+      "collision_mode": "Pass through",
+      "body_count": 3,
+      "sha256": "2bb90a85053b0f0677ec9226afd5cc5e3d3ac7e68f908b9e3e79e3d65b37e7a9"
+    },
+    {
+      "name": "Periodic · Euler collinear (T≈5.6199)",
+      "description": "Euler rotating collinear central configuration · nominal period 5.6199 time units",
+      "units": "Arbitrary units",
+      "integrator": "Dormand–Prince RK45 (adaptive)",
+      "collision_mode": "Pass through",
+      "body_count": 3,
+      "sha256": "889d670ef5b7d5d573b76975a443b42534aa2835a262be4b6f1950c0587236e6"
+    },
+    {
+      "name": "Periodic · Figure-eight (classic, T≈6.3259)",
+      "description": "Classic Chenciner–Montgomery figure-eight · nominal period 6.3259 time units",
+      "units": "Arbitrary units",
+      "integrator": "Dormand–Prince RK45 (adaptive)",
+      "collision_mode": "Pass through",
+      "body_count": 3,
+      "sha256": "1d2a58467cf66258fd539ee848fd230de328f38e1f06e742de2d99ee50406754"
+    },
+    {
+      "name": "Periodic · Goggles (T≈10.4668)",
+      "description": "Goggles · published initial-condition seed · nominal period 10.4668 time units",
+      "units": "Arbitrary units",
+      "integrator": "Dormand–Prince RK45 (adaptive)",
+      "collision_mode": "Pass through",
+      "body_count": 3,
+      "sha256": "e292d4a48a03e504323b145b55d0bee1373ed53839e274a92f953f52f16ff979"
+    },
+    {
+      "name": "Periodic · Lagrange equilateral (T≈3.6276)",
+      "description": "Lagrange rotating equilateral central configuration · nominal period 3.6276 time units",
+      "units": "Arbitrary units",
+      "integrator": "Dormand–Prince RK45 (adaptive)",
+      "collision_mode": "Pass through",
+      "body_count": 3,
+      "sha256": "b28e173f6911175433216f1acca2b5d5f259cb63613927da89fe3f7c7ac59181"
+    },
+    {
+      "name": "Periodic · Moth I (T≈14.8939)",
+      "description": "Moth I · published initial-condition seed · nominal period 14.8939 time units",
+      "units": "Arbitrary units",
+      "integrator": "Dormand–Prince RK45 (adaptive)",
+      "collision_mode": "Pass through",
+      "body_count": 3,
+      "sha256": "a1292de6a63364f3070d93defb2217713f098712d5f9895578795468fb5032c6"
+    },
+    {
+      "name": "Periodic · Moth II (T≈28.6703)",
+      "description": "Moth II · published initial-condition seed · nominal period 28.6703 time units",
+      "units": "Arbitrary units",
+      "integrator": "Dormand–Prince RK45 (adaptive)",
+      "collision_mode": "Pass through",
+      "body_count": 3,
+      "sha256": "e52a65f13657b9b86fcf83eeea198addc39c9aa041c81f7555748791bab5431a"
+    },
+    {
+      "name": "Periodic · Moth III (T≈25.8406)",
+      "description": "Moth III · published initial-condition seed · nominal period 25.8406 time units",
+      "units": "Arbitrary units",
+      "integrator": "Dormand–Prince RK45 (adaptive)",
+      "collision_mode": "Pass through",
+      "body_count": 3,
+      "sha256": "77bc0c1fc5b2645688f76948dd66415d81c2b79bb39f173ed2e3a9c2a3036b2a"
+    },
+    {
+      "name": "Periodic · Yarn (T≈55.5018)",
+      "description": "Yarn · published initial-condition seed · nominal period 55.5018 time units",
+      "units": "Arbitrary units",
+      "integrator": "Dormand–Prince RK45 (adaptive)",
+      "collision_mode": "Pass through",
+      "body_count": 3,
+      "sha256": "e662a01c311f97686b149d53e63646a94469023599129aae02005287bb3db3a0"
+    },
+    {
+      "name": "Periodic · Yin-Yang I (T≈17.3284)",
+      "description": "Yin-Yang I · published initial-condition seed · nominal period 17.3284 time units",
+      "units": "Arbitrary units",
+      "integrator": "Dormand–Prince RK45 (adaptive)",
+      "collision_mode": "Pass through",
+      "body_count": 3,
+      "sha256": "774a2bd9c86d1611840df1cff921c3c40376eecb25ff794cc2dc70ab00c5a27a"
+    },
+    {
+      "name": "Periodic · Yin-Yang I (branch b, T≈10.9626)",
+      "description": "Yin-Yang I · branch b · published initial-condition seed · nominal period 10.9626 time units",
+      "units": "Arbitrary units",
+      "integrator": "Dormand–Prince RK45 (adaptive)",
+      "collision_mode": "Pass through",
+      "body_count": 3,
+      "sha256": "1a4427c4809784f4bfdf1a2bc0f29dccafd7bb1177c28595b9c7a37449649998"
+    },
+    {
+      "name": "Periodic · Yin-Yang II (branch a, T≈55.7898)",
+      "description": "Yin-Yang II · branch a · published initial-condition seed · nominal period 55.7898 time units",
+      "units": "Arbitrary units",
+      "integrator": "Dormand–Prince RK45 (adaptive)",
+      "collision_mode": "Pass through",
+      "body_count": 3,
+      "sha256": "8bad3c40882616b721d19422a7dd3f125e83da16bfdaa8dbcc5de29487bd057f"
+    },
+    {
+      "name": "Periodic · Yin-Yang II (branch b, T≈54.2076)",
+      "description": "Yin-Yang II · branch b · published initial-condition seed · nominal period 54.2076 time units",
+      "units": "Arbitrary units",
+      "integrator": "Dormand–Prince RK45 (adaptive)",
+      "collision_mode": "Pass through",
+      "body_count": 3,
+      "sha256": "eaf685c796e937b9fae088c5fa43479e6c393ccd45a80e4b2e6ba78e61febaae"
+    },
+    {
+      "name": "Pythagorean 3-4-5 (chaotic)",
+      "description": "",
+      "units": "Arbitrary units",
+      "integrator": "Yoshida (4th order, symplectic)",
+      "collision_mode": "Merge (inelastic)",
+      "body_count": 3,
+      "sha256": "cc711dab033687b3e0efb019fb5eea0a165325b1c85436372a24e735e226b843"
+    },
+    {
+      "name": "Sun - Earth - Jupiter (astronomical)",
+      "description": "",
+      "units": "Astronomical (AU, Msun, yr)",
+      "integrator": "Yoshida (4th order, symplectic)",
+      "collision_mode": "Merge (inelastic)",
+      "body_count": 3,
+      "sha256": "ce07491bab678737ba2e797a4a11ba5a45b0e41714a5f0fee23121d1a622d325"
+    }
+  ],
+  "sha256": "251647b6dbf42f2fe6b263e20f09fde23828efe356237269b65df476219c53b3"
+}

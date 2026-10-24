@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "environment": {
+    "python": "3.13.5",
+    "platform": "Linux-6.18.55-x86_64-with-glibc2.41",
+    "numpy": "2.3.5"
+  },
+  "preset_sha256": "8ddefbc8b769a384ea1438af8ea51594f6918cf4847e51f9ae9579615798cded",
+  "cases": [
+    {
+      "case": "periodic-verlet",
+      "preset": "Periodic \u00b7 Figure-eight (classic, T\u22486.3259)",
+      "integrator": "Velocity Verlet (2nd order)",
+      "requested_steps": 200,
+      "elapsed_seconds_median": 0.002915719999975863,
+      "steps_per_second": 68593.6921246401,
+      "simulated_time": 0.3000000000000002,
+      "relative_energy_error": 6.452202288635801e-07,
+      "collision_mode": "Pass through"
+    },
+    {
+      "case": "periodic-yoshida",
+      "preset": "Periodic \u00b7 Figure-eight (classic, T\u22486.3259)",
+      "integrator": "Yoshida (4th order, symplectic)",
+      "requested_steps": 200,
+      "elapsed_seconds_median": 0.006758679000029133,
+      "steps_per_second": 29591.581431687748,
+      "simulated_time": 0.3000000000000002,
+      "relative_energy_error": 4.678293210447228e-12,
+      "collision_mode": "Pass through"
+    },
+    {
+      "case": "periodic-rk45",
+      "preset": "Periodic \u00b7 Figure-eight (classic, T\u22486.3259)",
+      "integrator": "Dormand\u2013Prince RK45 (adaptive)",
+      "requested_steps": 200,
+      "elapsed_seconds_median": 0.022195143999965694,
+      "steps_per_second": 9010.980059435935,
+      "simulated_time": 0.3000000000000002,
+      "relative_energy_error": 8.625489897207176e-16,
+      "collision_mode": "Pass through"
+    },
+    {
+      "case": "collision-free-yoshida",
+      "preset": "Sun - Earth - Jupiter (astronomical)",
+      "integrator": "Yoshida (4th order, symplectic)",
+      "requested_steps": 200,
+      "elapsed_seconds_median": 0.00688879500000894,
+      "steps_per_second": 29032.653751452966,
+      "simulated_time": 0.20000000000000015,
+      "relative_energy_error": 1.2953069333273754e-15,
+      "collision_mode": "Pass through"
+    },
+    {
+      "case": "collision-mode-merge",
+      "preset": "3D inclined triple (recommended)",
+      "integrator": "Yoshida (4th order, symplectic)",
+      "requested_steps": 200,
+      "elapsed_seconds_median": 0.014291836999973384,
+      "steps_per_second": 13994.002310575783,
+      "simulated_time": 0.6000000000000004,
+      "relative_energy_error": 1.741768515265641e-14,
+      "collision_mode": "Merge (inelastic)"
+    },
+    {
+      "case": "collision-heavy-overlap-start",
+      "preset": "synthetic-overlap-test",
+      "integrator": "Yoshida (4th order, symplectic)",
+      "requested_steps": 200,
+      "elapsed_seconds_median": 0.01577179100002013,
+      "steps_per_second": 12680.868013007826,
+      "simulated_time": 0.20000000000000018,
+      "relative_energy_error": 7.899849485128444e-13,
+      "collision_mode": "Bounce",
+      "collision_events": 2
+    }
+  ],
+  "acceleration_profile": {
+    "iterations": 1000,
+    "elapsed_seconds": 0.09440847700000177,
+    "calls_per_second": 10592.269166676433,
+    "tracemalloc_current_bytes": 2993,
+    "tracemalloc_peak_bytes": 3287,
+    "top_functions": "         3001 function calls in 0.093 seconds\n\n   Ordered by: cumulative time\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n     1000    0.001    0.000    0.093    0.000 /mnt/data/grav_phase23_work/Gravity_Lab_3D_Phase2_Next/gravity_lab/physics.py:179(accelerations)\n     1000    0.092    0.000    0.093    0.000 /mnt/data/grav_phase23_work/Gravity_Lab_3D_Phase2_Next/gravity_lab/physics.py:153(_accelerations_newtonian_pairs)\n     1000    0.001    0.000    0.001    0.000 {built-in method numpy.zeros}\n        1    0.000    0.000    0.000    0.000 {method 'disable' of '_lsprof.Profiler' objects}\n\n\n"
+  },
+  "notes": [
+    "Three independent timing repetitions; median reported.",
+    "Benchmark times vary by hardware and background load.",
+    "Collision-mode case may terminate early if a collision occurs."
+  ]
+}

@@ -99,3 +99,13 @@ python main.py --snapshot baseline.png --time 0.1
 ```
 
 GUI startup is `python main.py` or `run_gravity_lab.bat` on Windows. A successful headless snapshot/self-test is not a substitute for native Windows/Tk/VTK interaction testing.
+
+## Application controller, checkpoints, and renderer boundary
+
+`gravity_lab/application.py` converts preset definitions and parsed form values into validated `SimulationState` objects and exposes `SimulationController` commands for applying state and advancing frames. The Tk layer is responsible for collecting text and showing validation messages, not for constructing domain dataclasses itself.
+
+`gravity_lab/setup_io.py` owns validation and atomic disk I/O for legacy-compatible GUI setup JSON (schema version 1). `gravity_lab/state_io.py` stores versioned simulation checkpoints separately from the GUI setup JSON. A checkpoint includes the validated state, event queue, impact/touching flags, energy-loss counters, conservation baselines and RK45 counters. Files are written atomically and include a SHA-256 checksum over canonical JSON. The checkpoint is defined at a simulation-step boundary; transient renderer state, camera position and trail buffers are intentionally not part of the physical checkpoint.
+
+`SimulationService.render_frame()` provides a read-only `SceneFrame` to the VTK renderer. The renderer can inspect positions, velocities, masses, radii, active flags, spin/J2 properties, acceleration, centre of mass and influence-zone radii without taking ownership of the mutable integration engine. The old engine-taking offscreen snapshot helper remains compatible and wraps the engine in a `SceneFrame` internally.
+
+Preset metadata is serialized in stable sorted order and SHA-256 fingerprints are published in `docs/preset-manifest.json`. Benchmark reports record the full catalog fingerprint so measurements can be associated with a particular initial-condition catalog.

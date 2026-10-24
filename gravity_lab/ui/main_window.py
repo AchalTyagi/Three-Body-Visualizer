@@ -2,7 +2,6 @@
 from __future__ import annotations
 import csv
 import io
-import json
 import math
 import os
 import platform
@@ -24,6 +23,9 @@ from ..physics import (ThreeBodyEngine, History, VERLET, YOSHIDA, RK45, INTEGRAT
 from ..presets import PRESETS, PRESET_NAMES, ARBITRARY, ASTRO, engine_inputs
 from ..renderer_vtk import GravityScene
 from ..service import SimulationService
+from ..application import SimulationController, state_from_inputs
+from ..state_io import save_checkpoint, load_checkpoint
+from ..setup_io import write_setup_json, read_setup_json
 from ..state import BodyState, IntegratorSettings, PhysicsSettings, SimulationState
 from ..themes import THEMES, BODY_COLORS, BODY_NAMES
 from .diagnostics_panel import SparkGraph, format_finite, minimum_active_pair_separation
@@ -49,6 +51,7 @@ class GravityLabApp:
         root.minsize(1240, 780)
         self.engine: ThreeBodyEngine | None = None
         self.simulation_service = SimulationService()
+        self.controller = SimulationController(self.simulation_service)
         self.history = History(maxlen=2200)
         self.running = True
         self.failed = False
@@ -165,6 +168,8 @@ class GravityLabApp:
         files.add_separator()
         files.add_command(label="Load setup from JSON…", command=self._load_setup_json)
         files.add_command(label="Save setup to JSON…", command=self._save_setup_json)
+        files.add_command(label="Save exact simulation checkpoint…", command=self._save_checkpoint_dialog)
+        files.add_command(label="Load simulation checkpoint…", command=self._load_checkpoint_dialog)
         files.add_separator()
         files.add_command(label="Save current viewport as PNG…", command=self._save_png)
         files.add_command(label="Export simulation history as CSV…", command=self._export_csv)
@@ -205,7 +210,7 @@ class GravityLabApp:
             return
         self.scene.set_view_mode(self.view_mode_var.get())
         if self.engine is not None:
-            self.scene.fit_camera(self.engine, view_halfwidth=self._safe_float(self.view_var.get(), self.fixed_view),
+            self.scene.fit_camera(self.simulation_service.render_frame(), view_halfwidth=self._safe_float(self.view_var.get(), self.fixed_view),
                                   include_shells=self.shells_var.get())
         self._dirty = True
         self._render_once(force_field=True)
@@ -351,8 +356,7 @@ class GravityLabApp:
             "saved_at_utc": datetime.now(timezone.utc).isoformat(),
         }
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=2)
+            write_setup_json(path, payload)
             self.event_var.set(f"Saved setup: {os.path.basename(path)}")
         except OSError as exc:
             messagebox.showerror("Save setup failed", str(exc), parent=self.root)
@@ -363,13 +367,8 @@ class GravityLabApp:
         if not path:
             return
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                payload = json.load(f)
-            if payload.get("format") != "gravity-lab-3d-setup" or payload.get("schema_version") != 1:
-                raise ValueError("This file is not a supported Gravity Lab 3D setup JSON (schema version 1).")
-            bodies = payload.get("bodies")
-            if not isinstance(bodies, list) or len(bodies) != 3 or any(not isinstance(row, list) or len(row) != len(BODY_FIELDS) for row in bodies):
-                raise ValueError("Setup must contain three bodies with mass, radius, position and velocity values.")
+            payload = read_setup_json(path)
+            bodies = payload["bodies"]
             for row_vars, row_values in zip(self.body_vars, bodies):
                 for variable, value in zip(row_vars, row_values):
                     variable.set(str(value))
@@ -439,8 +438,90 @@ class GravityLabApp:
         except Exception as exc:
             messagebox.showerror("Load setup failed", str(exc), parent=self.root)
 
+    def _save_checkpoint_dialog(self):
+        path = filedialog.asksaveasfilename(
+            parent=self.root, title="Save exact simulation checkpoint",
+            defaultextension=".glcheckpoint.json",
+            filetypes=[("Gravity Lab checkpoint", "*.glcheckpoint.json"), ("JSON", "*.json")],
+        )
+        if not path:
+            return
+        try:
+            save_checkpoint(self.simulation_service, path)
+            self.event_var.set(f"Saved simulation checkpoint: {os.path.basename(path)}")
+        except (OSError, ValueError, RuntimeError) as exc:
+            messagebox.showerror("Checkpoint save failed", str(exc), parent=self.root)
+
+    def _load_checkpoint_dialog(self):
+        path = filedialog.askopenfilename(
+            parent=self.root, title="Load exact simulation checkpoint",
+            filetypes=[("Gravity Lab checkpoint", "*.glcheckpoint.json"), ("JSON", "*.json")],
+        )
+        if not path:
+            return
+        try:
+            restored = load_checkpoint(path)
+            state = restored.state
+            engine = restored.engine
+            if state is None or engine is None:
+                raise ValueError("Checkpoint does not contain a configured simulation.")
+            self.simulation_service = restored
+            self.controller = SimulationController(restored)
+            self.engine = engine
+            self.running = False
+            self.failed = not engine.is_healthy()
+            self.dt = state.integrator.dt
+            self.steps = state.integrator.steps_per_frame
+            self._last_event_seen = len(engine.events)
+            self._last_event_signature = engine.events[-1] if engine.events else None
+            self.units_var.set(state.physics.units)
+            self.G_var.set(_fmt(state.physics.gravitational_constant))
+            self.dt_var.set(_fmt(state.integrator.dt))
+            self.steps_var.set(str(state.integrator.steps_per_frame))
+            self.soft_var.set(_fmt(state.physics.softening))
+            self.rtol_var.set(_fmt(state.integrator.rtol))
+            self.atol_var.set(_fmt(state.integrator.atol))
+            self.integrator_var.set(state.integrator.method)
+            self.adaptive_var.set(state.integrator.adaptive)
+            self.collision_var.set(state.physics.collision_mode)
+            self.restitution_var.set(_fmt(state.physics.restitution))
+            self.enable_oblateness_var.set(state.physics.enable_oblateness)
+            self.enable_1pn_var.set(state.physics.enable_1pn)
+            self.enable_tides_var.set(state.physics.tidal_damping > 0.0)
+            self.c_light_var.set(_fmt(state.physics.c_light))
+            self.tidal_damping_var.set(_fmt(state.physics.tidal_damping))
+            for i, body in enumerate(state.bodies):
+                self.body_name_vars[i].set(body.name)
+                self.body_colors[i] = body.color
+                values = (body.mass, body.radius, *body.position, *body.velocity)
+                for var, value in zip(self.body_vars[i], values):
+                    var.set(_fmt(value))
+                self.j2_vars[i].set(_fmt(body.j2))
+                for var, value in zip(self.spin_axis_vars[i], body.spin_axis):
+                    var.set(_fmt(value))
+                for var, value in zip(self.spin_omega_vars[i], body.spin_omega):
+                    var.set(_fmt(value))
+            self._apply_body_colors()
+            self._custom_model_active = True
+            self.preset_var.set(CUSTOM_PRESET)
+            self.preset_info_var.set("Exact simulation checkpoint loaded. The simulation is paused at the saved time.")
+            self.system_metadata = {"source": "Loaded simulation checkpoint", "preset": CUSTOM_PRESET,
+                                    "epoch": None, "names": [body.name for body in state.bodies]}
+            self.history = History(maxlen=2200)
+            self.history.push(engine)
+            self.scene.reset_trails(engine.pos, max_trails=self.trail_count)
+            self.scene.push_positions(engine.pos, engine.alive)
+            self._apply_display_options()
+            self._update_metrics()
+            self._update_graphs()
+            self._refresh_event_log()
+            self._dirty = True
+            self.event_var.set(f"Loaded checkpoint at t={engine.t:.9g}; simulation paused.")
+        except (OSError, ValueError, RuntimeError, TypeError) as exc:
+            messagebox.showerror("Checkpoint load failed", str(exc), parent=self.root)
+
     def _open_horizons_import_dialog(self):
-        from .ephemeris import SOLAR_SYSTEM_BODIES
+        from ..ephemeris import SOLAR_SYSTEM_BODIES
         dialog = tk.Toplevel(self.root)
         dialog.title("Import NASA/JPL Horizons state vectors")
         dialog.transient(self.root)
@@ -480,7 +561,7 @@ class GravityLabApp:
             status.set("Contacting JPL Horizons… this can take a few seconds.")
             def worker():
                 try:
-                    from .ephemeris import fetch_three_body_horizons
+                    from ..ephemeris import fetch_three_body_horizons
                     result = fetch_three_body_horizons(names, epoch)
                     self.root.after(0, lambda result=result: self._apply_horizons_import(result, dialog))
                 except Exception as exc:
@@ -1187,47 +1268,15 @@ class GravityLabApp:
             if (p["enable_1pn"] or p["tidal_damping"] > 0.0) and self.integrator_var.get() != RK45:
                 self.integrator_var.set(RK45)
                 self.adaptive_var.set(True)
-            body_states = tuple(
-                BodyState(
-                    name=self.body_name_vars[i].get().strip() or f"Body {i + 1}",
-                    mass=float(p["m"][i]),
-                    radius=float(p["R"][i]),
-                    position=tuple(float(v) for v in p["pos"][i]),
-                    velocity=tuple(float(v) for v in p["vel"][i]),
-                    active=True,
-                    color=self.body_colors[i],
-                    j2=float(p["j2"][i]),
-                    spin_axis=tuple(float(v) for v in p["spin_axes"][i]),
-                    spin_omega=tuple(float(v) for v in p["spin_omega"][i]),
-                )
-                for i in range(3)
-            )
-            integrator_settings = IntegratorSettings(
-                method=self.integrator_var.get(),
-                dt=float(p["dt"]),
-                steps_per_frame=int(p["steps"]),
-                adaptive=bool(self.adaptive_var.get()),
-                rtol=float(p["rtol"]),
-                atol=float(p["atol"]),
-            )
-            physics_settings = PhysicsSettings(
-                gravitational_constant=float(p["G"]),
-                softening=float(p["soft"]),
-                collision_mode=p["collision"],
-                restitution=float(p["restitution"]),
+            model_state = state_from_inputs(
+                p,
+                body_names=[var.get().strip() or f"Body {i + 1}" for i, var in enumerate(self.body_name_vars)],
+                body_colors=self.body_colors,
                 units=self.units_var.get(),
-                enable_oblateness=bool(p["enable_oblateness"]),
-                enable_1pn=bool(p["enable_1pn"]),
-                c_light=float(p["c_light"]),
-                tidal_damping=float(p["tidal_damping"]),
+                integrator_method=self.integrator_var.get(),
+                adaptive=bool(self.adaptive_var.get()),
             )
-            model_state = SimulationState(
-                bodies=body_states,
-                current_time=0.0,
-                integrator=integrator_settings,
-                physics=physics_settings,
-            )
-            self.simulation_service.reset(model_state)
+            self.controller.apply_state(model_state)
             engine = self.simulation_service.engine
             if engine is None:  # Defensive: reset() must always create an engine.
                 raise RuntimeError("Simulation service did not create a physics engine.")
@@ -1278,8 +1327,8 @@ class GravityLabApp:
                                        show_acceleration=self.accel_var.get(), show_axes=self.axes_var.get(), zone_mode=self.zone_mode_var.get(),
                                        threshold=self.threshold)
         self.scene.reset_trails(self.engine.pos, self.trail_count)
-        self.scene.fit_camera(self.engine, view_halfwidth=self.fixed_view, include_shells=self.shells_var.get())
-        self.scene.update(self.engine, force_field=True)
+        self.scene.fit_camera(self.simulation_service.render_frame(), view_halfwidth=self.fixed_view, include_shells=self.shells_var.get())
+        self.scene.update(self.simulation_service.render_frame(), force_field=True)
         self._update_metrics()
         self._last_event_seen = len(self.engine.events)
         self._last_event_signature = self.engine.events[-1] if self.engine.events else None
@@ -1327,7 +1376,7 @@ class GravityLabApp:
         if self.running and not self.failed:
             # Scale the time step, not the integer step count, so the speed slider
             # remains effective below 0.5x instead of rounding to one full step.
-            self.simulation_service.advance(
+            self.controller.advance(
                 steps=self.steps,
                 dt=self.dt * self.speed_var.get(),
                 method=self.integrator_var.get(),
@@ -1368,7 +1417,7 @@ class GravityLabApp:
                 if len(live_pos):
                     pos_extent = float(np.max(np.abs(live_pos - self.engine.center_of_mass())))
                     if math.isfinite(pos_extent) and pos_extent > self.scene.view_halfwidth * 0.94:
-                        self.scene.fit_camera(self.engine, view_halfwidth=max(self.scene.view_halfwidth, pos_extent * 1.3),
+                        self.scene.fit_camera(self.simulation_service.render_frame(), view_halfwidth=max(self.scene.view_halfwidth, pos_extent * 1.3),
                                               include_shells=self.shells_var.get())
                         self._last_fit_frame = self._frame
             if self._frame - self._last_metric_update > 15:
@@ -1378,7 +1427,7 @@ class GravityLabApp:
                 self._update_graphs()
             self._update_status()
         if needs_scene_update:
-            self.scene.update(self.engine, force_field=self._dirty)
+            self.scene.update(self.simulation_service.render_frame(), force_field=self._dirty)
             self.scene.render()
             self._dirty = False
         self._schedule_tick()
@@ -1463,7 +1512,7 @@ class GravityLabApp:
     def _render_once(self, force_field=False):
         if self.engine is None or not hasattr(self, "scene"):
             return
-        self.scene.update(self.engine, force_field=force_field)
+        self.scene.update(self.simulation_service.render_frame(), force_field=force_field)
         self.scene.render()
         self._dirty = False
 
@@ -1477,7 +1526,7 @@ class GravityLabApp:
 
     def _fit_camera(self):
         if self.engine is not None:
-            self.scene.fit_camera(self.engine, view_halfwidth=self._safe_float(self.view_var.get(), self.fixed_view),
+            self.scene.fit_camera(self.simulation_service.render_frame(), view_halfwidth=self._safe_float(self.view_var.get(), self.fixed_view),
                                   include_shells=self.shells_var.get())
             self._dirty = True
             self._render_once(force_field=True)
