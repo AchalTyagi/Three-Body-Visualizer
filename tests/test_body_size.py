@@ -1,9 +1,10 @@
+import numpy as np
 import json
 
 import pytest
 
 from gravity_lab.body_size import (SIZE_FIXED, SIZE_MODES, SIZE_MULTIPLIER, SIZE_TRUE, default_sizes,
-                                   display_radius, normalise_sizes, overlap_warnings, sizes_to_payload,
+                                   display_radius, jpl_visual_radii, normalise_sizes, overlap_warnings, sizes_to_payload,
                                    validate_size)
 from gravity_lab.application import state_from_preset
 from gravity_lab.service import SimulationService
@@ -29,7 +30,8 @@ def test_fixed_ignores_physics_and_global_scale():
 
 def test_tiny_bodies_stay_visible():
     assert display_radius(1e-9, SIZE_TRUE, 1.0, 1.8, SPAN) == pytest.approx(FLOOR)
-    assert display_radius(1.0, SIZE_FIXED, 1e-9, 1.8, SPAN) == pytest.approx(FLOOR)
+    # An explicit fixed radius must bypass the generic visibility floor.
+    assert display_radius(1.0, SIZE_FIXED, 1e-9, 1.8, SPAN) == pytest.approx(1e-9)
 
 
 def test_render_loop_helper_never_raises_on_bad_input():
@@ -126,3 +128,19 @@ def test_overlap_warnings():
     w = overlap_warnings(names, [0.6, 0.6, 0.2], pos)
     assert len(w) == 1 and "A and B" in w[0]
     assert overlap_warnings(names, [0.6, 0.6, 0.2], pos, active=[True, False, True]) == []
+
+
+def test_jpl_earth_moon_visual_sizes_are_separated_without_changing_physical_radii():
+    from gravity_lab.ephemeris import SOLAR_SYSTEM_BODIES
+
+    names = ("Sun", "Earth", "Moon")
+    positions = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.00257, 0.0, 0.0]])
+    radii = [SOLAR_SYSTEM_BODIES[name]["radius_au"] for name in names]
+    sizes = jpl_visual_radii(names, radii, positions, global_scale=1.8)
+    values = [value for _mode, value in sizes]
+    earth_moon_distance = float(np.linalg.norm(positions[1] - positions[2]))
+    assert sizes[1][0] == SIZE_FIXED and sizes[2][0] == SIZE_FIXED
+    assert values[1] + values[2] < earth_moon_distance
+    assert values[1] == pytest.approx(earth_moon_distance * 0.12)
+    assert values[2] == pytest.approx(earth_moon_distance * 0.12)
+    assert radii == [SOLAR_SYSTEM_BODIES[name]["radius_au"] for name in names]

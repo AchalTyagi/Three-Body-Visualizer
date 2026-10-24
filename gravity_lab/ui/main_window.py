@@ -23,7 +23,7 @@ from ..physics import (ThreeBodyEngine, History, VERLET, YOSHIDA, RK45, INTEGRAT
                       ZONE_ROCHE, ZONE_MODES, AU_M, YEAR_S, MSUN_KG, G_AU_MSUN_YR, C_AU_PER_YEAR)
 from ..presets import PRESETS, PRESET_NAMES, ARBITRARY, ASTRO, engine_inputs
 from ..body_size import (DEFAULT_SIZE_MODE, DEFAULT_SIZE_VALUE, SIZE_FIXED, SIZE_MULTIPLIER, SIZE_TRUE, UNIT_HINTS,
-                         default_sizes, normalise_sizes, overlap_warnings, sizes_to_payload, validate_size)
+                         default_sizes, jpl_visual_radii, normalise_sizes, overlap_warnings, sizes_to_payload, validate_size)
 from ..camera import (DRAG_ORBIT, DRAG_PAN, DRAG_ZOOM, MACOS_NOTCH, WINDOWS_NOTCH, drag_action, drag_zoom_factor,
                       follow_translation, pan_translation, recentre, wheel_zoom_factor, zoom_about_point)
 from ..renderer_vtk import GravityScene
@@ -676,6 +676,14 @@ class GravityLabApp:
             for variable, value in zip(self.body_vars[i], vals):
                 variable.set(_fmt(value))
             self.body_name_vars[i].set(str(result.names[i]))
+        # JPL vectors use AU-scale separations. The generic scene visibility
+        # floor can make Earth and Moon appear to overlap, so assign explicit
+        # display-only radii based on their separation. Physics radii stay intact.
+        visual_sizes = jpl_visual_radii(
+            result.names, result.radii, result.positions,
+            global_scale=float(self.display_scale_var.get()),
+        )
+        self._set_body_size_vars(visual_sizes)
         self.preset_var.set("Custom / JPL Horizons")
         self.system_metadata = {
             "source": result.source, "epoch": result.epoch, "names": list(result.names),

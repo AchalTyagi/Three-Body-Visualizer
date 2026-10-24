@@ -78,13 +78,52 @@ def display_radius(physical_radius: float, mode: str, value: float,
     if not math.isfinite(factor) or factor <= 0.0:
         factor = 1.0
     if mode == SIZE_FIXED:
-        radius = factor
-    elif mode == SIZE_MULTIPLIER:
+        # Fixed radius is an explicit world-space size. Do not apply the
+        # scene-relative visibility floor: doing so can make nearby bodies
+        # (notably Earth and Moon in JPL imports) render larger than their
+        # actual separation even when the user selected a smaller radius.
+        return factor
+    if mode == SIZE_MULTIPLIER:
         radius = physical * scale * factor
     else:
         radius = physical * scale
     floor = max(float(span), 1e-12) * MIN_VISIBLE_FRACTION
     return max(radius, floor)
+
+
+def jpl_visual_radii(names, physical_radii, positions, global_scale: float = 1.8):
+    """Choose display-only radii for a JPL-imported trio, avoiding visual overlap.
+
+    Physical radii and the engine's collision radii are never modified. Earth
+    and Moon are modestly exaggerated relative to their mutual separation so
+    both remain inspectable in a system-scale view; all other bodies retain
+    their scaled physical radius unless that would overlap a neighbour.
+    Returns radii in the simulation's world units (AU for JPL imports).
+    """
+    labels = [str(name).strip().lower() for name in names]
+    physical = np.asarray(physical_radii, dtype=float).reshape(-1)
+    pos = np.asarray(positions, dtype=float).reshape(-1, 3)
+    if len(labels) != len(physical) or len(labels) != len(pos):
+        raise ValueError("names, physical_radii, and positions must have matching lengths")
+    scale = float(global_scale)
+    if not math.isfinite(scale) or scale <= 0:
+        scale = 1.0
+    sizes = np.maximum(physical, 0.0) * scale
+    for i in range(len(labels)):
+        distances = [float(np.linalg.norm(pos[i] - pos[j])) for j in range(len(labels)) if j != i]
+        if distances:
+            nearest = min(distances)
+            # Prevent giant visual spheres from engulfing a nearby body.
+            sizes[i] = min(sizes[i], max(nearest * 0.20, 1e-12))
+    if "earth" in labels and "moon" in labels:
+        earth_i, moon_i = labels.index("earth"), labels.index("moon")
+        separation = float(np.linalg.norm(pos[earth_i] - pos[moon_i]))
+        if math.isfinite(separation) and separation > 0:
+            target = separation * 0.12
+            cap = separation * 0.20
+            sizes[earth_i] = min(max(sizes[earth_i], target), cap)
+            sizes[moon_i] = min(max(sizes[moon_i], target), cap)
+    return [(SIZE_FIXED, max(float(radius), 1e-12)) for radius in sizes]
 
 
 def default_sizes(count: int = 3) -> list[tuple[str, float]]:
