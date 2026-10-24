@@ -4,6 +4,7 @@ import csv
 import io
 import math
 import os
+from dataclasses import replace
 import platform
 import re
 import threading
@@ -21,6 +22,7 @@ from ..physics import (ThreeBodyEngine, History, VERLET, YOSHIDA, RK45, INTEGRAT
                       MERGE, BOUNCE, PASS, STOP, FRAGMENT, COLLISION_MODES, ZONE_THRESH,
                       ZONE_ROCHE, ZONE_MODES, AU_M, YEAR_S, MSUN_KG, G_AU_MSUN_YR, C_AU_PER_YEAR)
 from ..presets import PRESETS, PRESET_NAMES, ARBITRARY, ASTRO, engine_inputs
+from ..camera import MACOS_NOTCH, WINDOWS_NOTCH, follow_translation, recentre, wheel_zoom_factor, zoom_about_point
 from ..renderer_vtk import GravityScene
 from ..service import SimulationService
 from ..application import SimulationController, state_from_inputs
@@ -70,6 +72,9 @@ class GravityLabApp:
 
         self.theme_var = tk.StringVar(value="Dark")
         self.view_mode_var = tk.StringVar(value="3D")
+        self.camera_focus_var = tk.StringVar(value="System center")
+        self.reference_frame_var = tk.StringVar(value="Inertial frame")
+        self._camera_follow_position = None
         # Optional physics extensions. These are disabled by default so the
         # built-in presets retain their intended Newtonian dynamics.
         self.enable_oblateness_var = tk.BooleanVar(value=False)
@@ -249,8 +254,9 @@ class GravityLabApp:
             return
         self.scene.set_view_mode(self.view_mode_var.get())
         if self.engine is not None:
-            self.scene.fit_camera(self.simulation_service.render_frame(), view_halfwidth=self._safe_float(self.view_var.get(), self.fixed_view),
+            self.scene.fit_camera(self._display_frame(), view_halfwidth=self._safe_float(self.view_var.get(), self.fixed_view),
                                   include_shells=self.shells_var.get())
+            self._camera_follow_position = None
         self._dirty = True
         self._render_once(force_field=True)
         self.event_var.set(f"Visualizer switched to {self.view_mode_var.get()} view.")
@@ -349,8 +355,9 @@ class GravityLabApp:
         messagebox.showinfo("Keyboard shortcuts",
             "Space — Play / pause simulation\nR — Apply values and reset (when an entry is not focused)\n"
             "2 — Switch to 2D XY view\n3 — Switch to 3D view\n"
+            "F — Fit view to the system\nC — Re-centre the camera on the focused body\n"
             "Preset search — type a name, family or description in the Search presets field\n"
-            "Mouse drag — Rotate the 3D camera (3D mode)\nMouse wheel — Zoom\n"
+            "Mouse drag — Rotate the 3D camera (3D mode)\nMouse wheel — Zoom toward the cursor\n"
             "Settings → Visualizer mode — Switch between 2D XY and 3D views\n"
             "File — Import JPL Horizons data and save/export results.", parent=self.root)
 
@@ -788,6 +795,16 @@ class GravityLabApp:
         ttk.Button(toolbar, text="Pause / Play", command=self._toggle_running).pack(side=tk.LEFT, padx=3)
         ttk.Button(toolbar, text="Reset simulation", command=self._apply_reset).pack(side=tk.LEFT, padx=3)
         ttk.Button(toolbar, text="Fit view", command=self._fit_camera).pack(side=tk.LEFT, padx=3)
+        ttk.Label(toolbar, text="Focus", style="Panel.TLabel").pack(side=tk.LEFT, padx=(8, 3))
+        self.camera_focus_combo = ttk.Combobox(toolbar, textvariable=self.camera_focus_var,
+                                               values=("System center",), state="readonly", width=13)
+        self.camera_focus_combo.pack(side=tk.LEFT, padx=3)
+        self.camera_focus_combo.bind("<<ComboboxSelected>>", self._on_camera_focus_changed)
+        ttk.Label(toolbar, text="Reference", style="Panel.TLabel").pack(side=tk.LEFT, padx=(6, 3))
+        self.reference_frame_combo = ttk.Combobox(toolbar, textvariable=self.reference_frame_var,
+                                                   values=("Inertial frame",), state="readonly", width=13)
+        self.reference_frame_combo.pack(side=tk.LEFT, padx=3)
+        self.reference_frame_combo.bind("<<ComboboxSelected>>", self._on_reference_frame_changed)
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=2)
         ttk.Label(toolbar, text="Speed", style="Panel.TLabel").pack(side=tk.LEFT, padx=(0, 4))
         ttk.Scale(toolbar, from_=0.1, to=5.0, variable=self.speed_var, orient=tk.HORIZONTAL,
@@ -925,8 +942,8 @@ class GravityLabApp:
         self.vtk_canvas.bind("<B3-Motion>", lambda e: self._vtk_mouse(e, "MouseMoveEvent"))
         self.vtk_canvas.bind("<Motion>", lambda e: self._vtk_mouse(e, "MouseMoveEvent"))
         self.vtk_canvas.bind("<MouseWheel>", self._vtk_wheel)
-        self.vtk_canvas.bind("<Button-4>", lambda e: self._vtk_mouse(e, "MouseWheelForwardEvent"))
-        self.vtk_canvas.bind("<Button-5>", lambda e: self._vtk_mouse(e, "MouseWheelBackwardEvent"))
+        self.vtk_canvas.bind("<Button-4>", lambda e: self._vtk_wheel(e, direction=1))
+        self.vtk_canvas.bind("<Button-5>", lambda e: self._vtk_wheel(e, direction=-1))
 
     def _vtk_mouse(self, event, vtk_event):
         try:
@@ -937,8 +954,63 @@ class GravityLabApp:
         except (AttributeError, RuntimeError):
             pass
 
-    def _vtk_wheel(self, event):
-        self._vtk_mouse(event, "MouseWheelForwardEvent" if event.delta > 0 else "MouseWheelBackwardEvent")
+    def _vtk_wheel(self, event, direction=None):
+        """Zoom at the cursor by anchoring the cursor ray to the focal plane.
+
+        Do not pick a body surface here: using a surface at a different depth
+        makes the camera jump when zooming.  The focal-plane anchor gives a
+        stable CAD-style zoom and works even when the cursor is over empty space.
+
+        The maths lives in :mod:`gravity_lab.camera`.  It handles the 2D
+        (parallel-projection) view, where ``Dolly`` has no visible effect and the
+        parallel scale must change instead, clamps zoom to sensible limits, and
+        scales the step by the actual wheel delta so touchpads feel smooth.
+        """
+        try:
+            renderer = self.scene.renderer
+            camera = renderer.GetActiveCamera()
+            canvas_w = max(1, self.vtk_canvas.winfo_width())
+            canvas_h = max(1, self.vtk_canvas.winfo_height())
+            # Use render-window dimensions for VTK display coordinates. Tk and
+            # VTK sizes can differ slightly on Windows with display scaling.
+            rw_w, rw_h = self.vtk_render_window.GetSize()
+            rw_w, rw_h = max(1, int(rw_w)), max(1, int(rw_h))
+            x = int(round(float(event.x) * rw_w / canvas_w))
+            y = int(round((canvas_h - 1 - float(event.y)) * rw_h / canvas_h))
+            x = min(max(x, 0), rw_w - 1)
+            y = min(max(y, 0), rw_h - 1)
+
+            focal = np.asarray(camera.GetFocalPoint(), dtype=float)
+            position = np.asarray(camera.GetPosition(), dtype=float)
+            renderer.SetWorldPoint(float(focal[0]), float(focal[1]), float(focal[2]), 1.0)
+            renderer.WorldToDisplay()
+            focal_display = renderer.GetDisplayPoint()
+            renderer.SetDisplayPoint(float(x), float(y), float(focal_display[2]))
+            renderer.DisplayToWorld()
+            world_h = np.asarray(renderer.GetWorldPoint(), dtype=float)
+            if abs(float(world_h[3])) > 1e-15:
+                cursor_world = world_h[:3] / world_h[3]
+            else:
+                cursor_world = world_h[:3]
+
+            notch = MACOS_NOTCH if sys.platform == "darwin" else WINDOWS_NOTCH
+            factor = wheel_zoom_factor(delta=getattr(event, "delta", None), direction=direction, notch_size=notch)
+            parallel = bool(camera.GetParallelProjection())
+            new_position, new_focal, new_scale, applied = zoom_about_point(
+                position, focal, cursor_world, factor, parallel,
+                camera.GetParallelScale(), self.scene.view_halfwidth)
+            if applied != 1.0:
+                camera.SetPosition(*new_position)
+                camera.SetFocalPoint(*new_focal)
+                if parallel:
+                    camera.SetParallelScale(float(new_scale))
+                renderer.ResetCameraClippingRange()
+                self._dirty = True
+                self._render_once()
+            return "break"
+        except (AttributeError, RuntimeError, ValueError, ZeroDivisionError, TypeError):
+            # Keep mouse-wheel interaction safe if VTK is mid-resize/rebuild.
+            return "break"
 
     def _resize_vtk(self, event=None):
         if not hasattr(self, "vtk_render_window"):
@@ -1047,8 +1119,13 @@ class GravityLabApp:
 
     def _on_mousewheel(self, event):
         try:
-            if self.side_canvas.winfo_containing(event.x_root, event.y_root) is not None:
-                self.side_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            # Only scroll the sidebar when the pointer is actually over it; the
+            # viewport and diagnostics area must not scroll it as a side effect.
+            under_pointer = self.side_canvas.winfo_containing(event.x_root, event.y_root)
+            if under_pointer is not None and str(under_pointer).startswith(str(self.side_canvas)):
+                notch = MACOS_NOTCH if sys.platform == "darwin" else WINDOWS_NOTCH
+                steps = -event.delta / notch
+                self.side_canvas.yview_scroll(int(math.copysign(max(1, abs(round(steps))), steps)) if steps else 0, "units")
         except (tk.TclError, AttributeError):
             pass
 
@@ -1366,9 +1443,12 @@ class GravityLabApp:
                                        show_trails=self.trail_var.get(), show_floor=self.floor_var.get(),
                                        show_acceleration=self.accel_var.get(), show_axes=self.axes_var.get(), zone_mode=self.zone_mode_var.get(),
                                        threshold=self.threshold)
-        self.scene.reset_trails(self.engine.pos, self.trail_count)
-        self.scene.fit_camera(self.simulation_service.render_frame(), view_halfwidth=self.fixed_view, include_shells=self.shells_var.get())
-        self.scene.update(self.simulation_service.render_frame(), force_field=True)
+        self._refresh_camera_choices()
+        display_frame = self._display_frame()
+        self.scene.reset_trails(display_frame.pos, self.trail_count)
+        self.scene.fit_camera(display_frame, view_halfwidth=self.fixed_view, include_shells=self.shells_var.get())
+        self.scene.update(display_frame, force_field=True)
+        self._camera_follow_position = None
         self._update_metrics()
         self._last_event_seen = len(self.engine.events)
         self._last_event_signature = self.engine.events[-1] if self.engine.events else None
@@ -1432,7 +1512,8 @@ class GravityLabApp:
                 self.status_var.set("Simulation service has no active engine. Reset to continue.")
                 self._schedule_tick()
                 return
-            self.scene.push_positions(self.engine.pos, self.engine.alive)
+            display_frame = self._display_frame()
+            self.scene.push_positions(display_frame.pos, self.engine.alive)
             self.history.push(self.engine)
             if self.engine.events and (len(self.engine.events) > self._last_event_seen
                                         or self.engine.events[-1] != self._last_event_signature):
@@ -1452,7 +1533,8 @@ class GravityLabApp:
                 self.failed = True
                 self.running = False
                 self.status_var.set("Numerical instability detected. Reduce Δt or enable adaptive stepping, then reset.")
-            if (self.autozoom_var.get() and self.engine.is_healthy() and np.any(self.engine.alive)
+            if (self.autozoom_var.get() and self._selected_body_index(self.camera_focus_var.get()) is None
+                    and self.engine.is_healthy() and np.any(self.engine.alive)
                     and self._frame - self._last_fit_frame > 50):
                 live_pos = self.engine.pos[self.engine.alive]
                 if len(live_pos):
@@ -1468,7 +1550,8 @@ class GravityLabApp:
                 self._update_graphs()
             self._update_status()
         if needs_scene_update:
-            self.scene.update(self.simulation_service.render_frame(), force_field=self._dirty)
+            self.scene.update(self._display_frame(), force_field=self._dirty)
+            self._follow_camera_target()
             self.scene.render()
             self._dirty = False
         self._schedule_tick()
@@ -1550,10 +1633,113 @@ class GravityLabApp:
             f"|ΔE/E₀| = {energy}  ·  |ΔL/L₀| = {angmom}  ·  ΔP/P₀ = {momentum}  ·  minimum separation = {min_sep_text}{rk_note}\n"
             f"Collision mode: {self.collision_var.get()}  ·  {ext_note}")
 
+    def _body_names_for_camera(self):
+        return [v.get().strip() or f"Body {i + 1}" for i, v in enumerate(self.body_name_vars)]
+
+    def _selected_body_index(self, value):
+        if value in ("System center", "Inertial frame"):
+            return None
+        names = self._body_names_for_camera()
+        try:
+            return names.index(value)
+        except ValueError:
+            return None
+
+    def _refresh_camera_choices(self):
+        if not hasattr(self, "camera_focus_combo"):
+            return
+        names = self._body_names_for_camera()
+        focus_values = ["System center", *names]
+        reference_values = ["Inertial frame", *names]
+        self.camera_focus_combo.configure(values=focus_values)
+        self.reference_frame_combo.configure(values=reference_values)
+        if self.camera_focus_var.get() not in focus_values:
+            self.camera_focus_var.set("System center")
+        if self.reference_frame_var.get() not in reference_values:
+            self.reference_frame_var.set("Inertial frame")
+
+    def _display_frame(self):
+        """Return an immutable render frame expressed in the chosen body frame."""
+        frame = self.simulation_service.render_frame()
+        index = self._selected_body_index(self.reference_frame_var.get())
+        if index is None or not frame.alive[index]:
+            return frame
+        origin = np.asarray(frame.pos[index], dtype=float).copy()
+        origin_velocity = np.asarray(frame.vel[index], dtype=float).copy()
+        acceleration = np.asarray(frame.accelerations())
+        return replace(frame, pos=np.asarray(frame.pos) - origin,
+                       vel=np.asarray(frame.vel) - origin_velocity,
+                       _acceleration=acceleration - acceleration[index])
+
+    def _on_camera_focus_changed(self, _event=None):
+        self._camera_follow_position = None
+        self._dirty = True
+        self._render_once(force_field=True)
+
+    def _on_reference_frame_changed(self, _event=None):
+        if self.engine is None:
+            return
+        self._camera_follow_position = None
+        frame = self._display_frame()
+        self.scene.reset_trails(frame.pos, self.trail_count)
+        self.scene.fit_camera(frame, view_halfwidth=self.fixed_view,
+                              include_shells=self.shells_var.get())
+        self._dirty = True
+        self._render_once(force_field=True)
+
+    def _follow_camera_target(self):
+        """Lock the camera rig to the focused body's displayed world position.
+
+        The camera and focal point are translated by the body's displacement,
+        rather than resetting the focal point every frame.  This preserves the
+        user's orbit angle and any cursor-zoom/pan offset while following motion.
+        """
+        if self.engine is None:
+            return
+        index = self._selected_body_index(self.camera_focus_var.get())
+        if index is None or not self.engine.alive[index]:
+            self._camera_follow_position = None
+            return
+        # Must use the exact coordinates that were sent to the renderer. This
+        # also handles a selected reference frame and any future render offsets.
+        display_frame = self._display_frame()
+        target = np.asarray(display_frame.pos[index], dtype=float).copy()
+        camera = self.scene.renderer.GetActiveCamera()
+        delta = follow_translation(target, self._camera_follow_position, camera.GetFocalPoint())
+        if np.any(np.abs(delta) > 0):
+            position = np.asarray(camera.GetPosition(), dtype=float)
+            focal = np.asarray(camera.GetFocalPoint(), dtype=float)
+            camera.SetPosition(*(position + delta))
+            camera.SetFocalPoint(*(focal + delta))
+        self._camera_follow_position = target if np.all(np.isfinite(target)) else None
+
+    def _recenter_camera(self):
+        """Remove any pan/cursor-zoom offset: centre on the focused body (or the origin).
+
+        Keeps the orbit angle and zoom level, so it is a gentle "snap back"
+        rather than a full Fit view.
+        """
+        if self.engine is None or not hasattr(self, "scene"):
+            return
+        index = self._selected_body_index(self.camera_focus_var.get())
+        target = np.zeros(3)
+        if index is not None and self.engine.alive[index]:
+            target = np.asarray(self._display_frame().pos[index], dtype=float)
+        camera = self.scene.renderer.GetActiveCamera()
+        position, focal = recentre(camera.GetPosition(), camera.GetFocalPoint(), target)
+        camera.SetPosition(*position)
+        camera.SetFocalPoint(*focal)
+        self._camera_follow_position = target.copy() if index is not None else None
+        self.scene.renderer.ResetCameraClippingRange()
+        self._dirty = True
+        self._render_once()
+
     def _render_once(self, force_field=False):
         if self.engine is None or not hasattr(self, "scene"):
             return
-        self.scene.update(self.simulation_service.render_frame(), force_field=force_field)
+        self._refresh_camera_choices()
+        self.scene.update(self._display_frame(), force_field=force_field)
+        self._follow_camera_target()
         self.scene.render()
         self._dirty = False
 
@@ -1567,8 +1753,9 @@ class GravityLabApp:
 
     def _fit_camera(self):
         if self.engine is not None:
-            self.scene.fit_camera(self.simulation_service.render_frame(), view_halfwidth=self._safe_float(self.view_var.get(), self.fixed_view),
+            self.scene.fit_camera(self._display_frame(), view_halfwidth=self._safe_float(self.view_var.get(), self.fixed_view),
                                   include_shells=self.shells_var.get())
+            self._camera_follow_position = None
             self._dirty = True
             self._render_once(force_field=True)
 
@@ -1641,6 +1828,10 @@ class GravityLabApp:
         elif event.keysym == "3":
             self.view_mode_var.set("3D")
             self._apply_view_mode()
+        elif event.keysym.lower() == "f":
+            self._fit_camera()
+        elif event.keysym.lower() == "c":
+            self._recenter_camera()
 
     def _close(self):
         self._closed = True

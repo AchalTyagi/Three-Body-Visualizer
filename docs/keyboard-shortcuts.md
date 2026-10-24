@@ -8,12 +8,16 @@
 | `R` | Apply current values and reset | Disabled while editing an entry or focused control. |
 | `2` | Switch to 2D XY view | Disabled while editing an entry or focused control. |
 | `3` | Switch to 3D view | Disabled while editing an entry or focused control. |
+| `F` | Fit view to the system | Same as the **Fit view** button. Disabled while editing an entry or focused control. |
+| `C` | Re-centre the camera | Removes any pan / cursor-zoom offset on the focused body (or the origin) while keeping orbit angle and zoom. |
 
 ## Pointer and controls
 
 - Search presets by name, family, or description using **Search presets** above the preset selector.
-- Drag inside the 3D viewport to rotate the camera; use the mouse wheel to zoom.
+- Drag inside the 3D viewport to rotate the camera; use the mouse wheel to zoom toward the cursor (works in both the 3D and 2D views). Zoom is limited to a sensible range so the view can't be lost, and touchpad scrolling zooms proportionally to the scroll distance.
 - Use **Fit View** to frame the current system without resetting its physics state.
+- Set **Focus** in the top toolbar to a body to keep it centered as it moves; mouse-wheel zoom then stays centered on that body. Choose **System center** to return to the normal camera focus.
+- Set **Reference** to a body to view positions, velocities, and acceleration vectors relative to it. Choose **Inertial frame** to return to the original coordinates. This changes only the visualization, not the simulated physics.
 - Use the Settings menu to change theme and 2D/3D view.
 - Use File → Save setup to JSON to save body inputs and physics configuration; use Save exact simulation checkpoint to preserve runtime state.
 
