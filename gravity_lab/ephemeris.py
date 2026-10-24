@@ -30,6 +30,9 @@ SOLAR_SYSTEM_BODIES = {
     "Mercury": {"id": "199", "mass": 1.66012e-7,  "radius_au": 2.4397e3 / (AU_M / 1000.0)},
     "Venus":   {"id": "299", "mass": 2.44784e-6,  "radius_au": 6.0518e3 / (AU_M / 1000.0)},
     "Earth":   {"id": "399", "mass": 3.00349e-6,  "radius_au": 6.3710e3 / (AU_M / 1000.0)},
+    # JPL Horizons target ID 301 is the Moon's center; mass and radius are
+    # physical properties supplied locally because Horizons vectors omit them.
+    "Moon":    {"id": "301", "mass": 3.694298e-8, "radius_au": 1.7374e3 / (AU_M / 1000.0)},
     "Mars":    {"id": "499", "mass": 3.22715e-7,  "radius_au": 3.3895e3 / (AU_M / 1000.0)},
     "Jupiter": {"id": "599", "mass": 9.54588e-4,  "radius_au": 6.9911e4 / (AU_M / 1000.0)},
     "Saturn":  {"id": "699", "mass": 2.85812e-4,  "radius_au": 5.8232e4 / (AU_M / 1000.0)},

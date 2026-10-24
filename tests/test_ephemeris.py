@@ -85,3 +85,37 @@ def test_fetch_horizons_body_constructs_barycentric_vector_query(monkeypatch):
     assert query["OUT_UNITS"] == ["'AU-D'"]
     np.testing.assert_allclose(state.position_au, (1.0, 2.0, 3.0))
     np.testing.assert_allclose(state.velocity_au_per_year, np.array([0.01, 0.02, 0.03]) * 365.25)
+
+
+def test_moon_is_available_in_jpl_horizons_catalog():
+    moon = SOLAR_SYSTEM_BODIES["Moon"]
+    assert moon["id"] == "301"
+    assert moon["mass"] > 0
+    assert 0 < moon["radius_au"] < SOLAR_SYSTEM_BODIES["Earth"]["radius_au"]
+    assert moon["id"] not in {body["id"] for name, body in SOLAR_SYSTEM_BODIES.items() if name != "Moon"}
+
+
+def test_fetch_moon_uses_horizons_moon_target_id(monkeypatch):
+    import json
+    from urllib.parse import parse_qs, urlparse
+    import gravity_lab.ephemeris as ephemeris
+
+    sample = {
+        "signature": {"source": "NASA/JPL Horizons API", "version": "1.0"},
+        "result": """$$SOE\n2450000.500000000 = A.D. 1995-Oct-09 00:00:00.0000 TDB\n X = 1.0E+00 Y = 2.0E+00 Z = 3.0E+00\n VX= 1.0E-02 VY= 2.0E-02 VZ= 3.0E-02\n$$EOE\n""",
+    }
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def read(self): return json.dumps(sample).encode("utf-8")
+    captured = {}
+    def fake_urlopen(request, timeout=20.0):
+        captured["url"] = request.full_url
+        return FakeResponse()
+    monkeypatch.setattr(ephemeris, "urlopen", fake_urlopen)
+    state = ephemeris.fetch_horizons_body("Moon", "2026-10-24")
+    query = parse_qs(urlparse(captured["url"]).query)
+    assert query["COMMAND"] == ["'301'"]
+    assert state.name == "Moon"
+    assert state.target_id == "301"
+    assert state.mass_solar == SOLAR_SYSTEM_BODIES["Moon"]["mass"]

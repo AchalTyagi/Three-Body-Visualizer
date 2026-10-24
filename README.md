@@ -86,7 +86,7 @@ You can edit the **RK45 relative tolerance** and **RK45 absolute tolerance** fie
 
 ## JPL Horizons import and REBOUND comparison
 
-Use **File → Import JPL Horizons states…** to select an epoch and three distinct supported bodies (Sun, Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, or Neptune). An internet connection is required. Body masses and radii are approximate catalogue values; Horizons supplies the state vectors. The imported system is then simulated as an isolated three-body problem, not as a complete ephemeris propagator.
+Use **File → Import JPL Horizons states…** to select an epoch and three distinct supported bodies (Sun, Mercury, Venus, Earth, Moon, Mars, Jupiter, Saturn, Uranus, or Neptune). An internet connection is required. Body masses and radii are approximate catalogue values; Horizons supplies the state vectors. The imported system is then simulated as an isolated three-body problem, not as a complete ephemeris propagator.
 
 Horizons API reference: [NASA/JPL Horizons API documentation](https://ssd-api.jpl.nasa.gov/doc/horizons.html).
 
