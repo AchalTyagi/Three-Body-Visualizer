@@ -28,6 +28,7 @@ from ..state_io import save_checkpoint, load_checkpoint
 from ..setup_io import write_setup_json, read_setup_json
 from ..state import BodyState, IntegratorSettings, PhysicsSettings, SimulationState
 from ..themes import THEMES, BODY_COLORS, BODY_NAMES
+from ..preferences import load_preferences, save_preferences
 from .diagnostics_panel import SparkGraph, format_finite, minimum_active_pair_separation
 
 BODY_FIELDS = ("Mass", "Radius", "x", "y", "z", "vx", "vy", "vz")
@@ -62,6 +63,7 @@ class GravityLabApp:
         self._last_event_signature = None
         self._last_fit_frame = 0
         self._closed = False
+        self._tick_after_id = None
         self.system_metadata = {"source": "Built-in preset", "epoch": None, "names": []}
         self.initial_snapshot = None
         self.last_reference_report = ""
@@ -120,12 +122,49 @@ class GravityLabApp:
         self.display_scale_label_var = tk.StringVar(value="Visual body scale: 1.8×")
         self._event_log_rendered_count = -1
 
+        self._load_user_preferences()
         self._configure_style()
         self._build_ui()
         self._load_preset()
         self.root.bind_all("<Key>", self._on_key)
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         self._schedule_tick()
+
+    def _load_user_preferences(self):
+        """Restore UI-only preferences without restoring a simulation or body state."""
+        preferences = load_preferences()
+        if preferences.get("theme") in THEMES:
+            self.theme_var.set(preferences["theme"])
+        if preferences.get("view_mode") in ("2D", "3D"):
+            self.view_mode_var.set(preferences["view_mode"])
+        for key, variable in (
+            ("speed", self.speed_var), ("display_scale", self.display_scale_var),
+            ("trail", self.trail_var), ("floor", self.floor_var), ("axes", self.axes_var),
+            ("shells", self.shells_var), ("field", self.field_var), ("accel", self.accel_var),
+            ("com", self.com_var), ("autozoom", self.autozoom_var),
+            ("view", self.view_var), ("trail_len", self.trail_len_var),
+        ):
+            if key in preferences:
+                try:
+                    variable.set(preferences[key])
+                except (tk.TclError, ValueError):
+                    pass
+
+    def _save_user_preferences(self):
+        """Persist stable UI choices; simulation initial conditions use setup/checkpoint files."""
+        preferences = {
+            "schema_version": 1,
+            "theme": self.theme_var.get() if self.theme_var.get() in THEMES else "Dark",
+            "view_mode": self.view_mode_var.get() if self.view_mode_var.get() in ("2D", "3D") else "3D",
+            "speed": float(self.speed_var.get()),
+            "display_scale": float(self.display_scale_var.get()),
+            "trail": bool(self.trail_var.get()), "floor": bool(self.floor_var.get()),
+            "axes": bool(self.axes_var.get()), "shells": bool(self.shells_var.get()),
+            "field": bool(self.field_var.get()), "accel": bool(self.accel_var.get()),
+            "com": bool(self.com_var.get()), "autozoom": bool(self.autozoom_var.get()),
+            "view": str(self.view_var.get()), "trail_len": str(self.trail_len_var.get()),
+        }
+        save_preferences(preferences)
 
     def _configure_style(self):
         self.palette = THEMES.get(self.theme_var.get(), THEMES["Dark"])
@@ -310,6 +349,7 @@ class GravityLabApp:
         messagebox.showinfo("Keyboard shortcuts",
             "Space — Play / pause simulation\nR — Apply values and reset (when an entry is not focused)\n"
             "2 — Switch to 2D XY view\n3 — Switch to 3D view\n"
+            "Preset search — type a name, family or description in the Search presets field\n"
             "Mouse drag — Rotate the 3D camera (3D mode)\nMouse wheel — Zoom\n"
             "Settings → Visualizer mode — Switch between 2D XY and 3D views\n"
             "File — Import JPL Horizons data and save/export results.", parent=self.root)
@@ -1366,9 +1406,10 @@ class GravityLabApp:
     def _schedule_tick(self):
         if self._closed:
             return
-        self.root.after(16 if self.running else 80, self._tick)
+        self._tick_after_id = self.root.after(16 if self.running else 80, self._tick)
 
     def _tick(self):
+        self._tick_after_id = None
         if self._closed or self.engine is None:
             return
         self._frame += 1
@@ -1603,6 +1644,17 @@ class GravityLabApp:
 
     def _close(self):
         self._closed = True
+        if self._tick_after_id is not None:
+            try:
+                self.root.after_cancel(self._tick_after_id)
+            except tk.TclError:
+                pass
+            self._tick_after_id = None
+        try:
+            self._save_user_preferences()
+        except (OSError, ValueError, tk.TclError):
+            # Preference persistence must never prevent the user from closing the app.
+            pass
         try:
             self.vtk_interactor.Disable()
         except Exception:

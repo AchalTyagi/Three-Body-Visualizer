@@ -6,11 +6,19 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12"]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.10"
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.12"
+          - os: macos-latest
+            python-version: "3.12"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,6 +27,10 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Install package
+        run: python -m pip install -e .
+      - name: Import smoke test
+        run: python -c "import gravity_lab; import gravity_lab.ui.main_window; import gravity_lab.renderer_vtk; import gravity_lab.preferences"
       - name: Run regression suite
         run: python -m pytest -q
       - name: Run physics self-checks
