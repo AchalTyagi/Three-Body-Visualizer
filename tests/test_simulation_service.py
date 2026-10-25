@@ -102,3 +102,20 @@ def test_render_frame_is_read_only_and_contains_renderer_data():
     assert frame.center_of_mass().shape == (3,)
     with pytest.raises(ValueError):
         frame.pos[0, 0] = 99
+
+
+def test_service_can_restore_a_complete_saved_engine_state_and_time():
+    import copy
+
+    service = SimulationService(sample_state())
+    saved_engine = copy.deepcopy(service.engine)
+    assert saved_engine is not None
+    saved_time = saved_engine.t
+    service.advance(steps=2, dt=1e-5, method=RK45, adaptive=True)
+    assert service.snapshot().time > saved_time
+
+    restored = service.restore_engine(saved_engine)
+    assert restored.time == pytest.approx(saved_time)
+    assert service.engine is saved_engine
+    assert service.state is not None
+    assert service.state.current_time == pytest.approx(saved_time)

@@ -286,6 +286,19 @@ class SimulationService:
             raise RuntimeError("No simulation has been configured. Call reset(state) first.")
         return SimulationSnapshot.from_engine(self._engine)
 
+    def restore_engine(self, engine: ThreeBodyEngine) -> SimulationSnapshot:
+        """Restore a previously captured complete engine state (timeline rewind).
+
+        The caller supplies an isolated engine copy. The service adopts it and
+        synchronizes the validated application state without resetting its time.
+        """
+        if not isinstance(engine, ThreeBodyEngine):
+            raise TypeError("Timeline restore requires a ThreeBodyEngine instance.")
+        self._engine = engine
+        if self.state is not None and engine.is_healthy():
+            self._sync_state_from_engine()
+        return self.snapshot()
+
     def advance(
         self,
         steps: float | None = None,

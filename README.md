@@ -339,3 +339,12 @@ Generate reproducible local performance measurements with `python benchmarks/run
 The Reference selector now includes **Barycentric frame** in addition to the inertial frame and each named body. The barycentric view subtracts the center-of-mass position and velocity of the currently active bodies; it is a translating, non-rotating frame. Selecting a body subtracts that body's position, velocity, and acceleration from the displayed state. These are visualization transforms only: the integrator continues to evolve the original physical state.
 
 The existing trail system records the displayed coordinates, so changing the reference frame resets trails and begins a fresh relative trajectory in that frame. The status panel reports each active pair's current separation, relative speed, and closest sampled approach/time for the current run. Closest approach is sampled at simulation updates, not continuously between integration steps, so very brief minima can fall between samples.
+
+## Phase 6 — Playback and timeline
+
+- The simulation now starts **paused**. Press **Pause / Play** (or Space) to begin advancing time.
+- Use **Step +** to advance one configured simulation interval while paused and **Step −** to restore the previous recorded state.
+- The timeline slider scrubs through a bounded in-memory history of complete engine states. Scrubbing pauses the simulation and restores the selected state, including its simulation time and engine event history.
+- Press Play after rewinding to branch from that point; previously recorded future states are discarded.
+- The timeline retains up to 1,800 recorded frame states in memory. This is an in-session playback history, separate from the existing exact checkpoint save/load feature. Restarting the application does not persist the timeline history.
+- The timeline's time label uses years for astronomical units and model-time units for arbitrary systems.

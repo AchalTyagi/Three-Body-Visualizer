@@ -1,6 +1,7 @@
 """Tkinter control panel and VTK-embedded interactive 3D visualizer."""
 from __future__ import annotations
 import csv
+import copy
 import io
 import math
 import os
@@ -60,7 +61,7 @@ class GravityLabApp:
         self.simulation_service = SimulationService()
         self.controller = SimulationController(self.simulation_service)
         self.history = History(maxlen=2200)
-        self.running = True
+        self.running = False
         self.failed = False
         self._dirty = True
         self._frame = 0
@@ -70,6 +71,13 @@ class GravityLabApp:
         self._last_fit_frame = 0
         self._closed = False
         self._tick_after_id = None
+        # Bounded in-memory timeline of complete engine states for reliable rewind.
+        self._timeline = []
+        self._timeline_index = 0
+        self._timeline_maxlen = 1800
+        self._timeline_updating = False
+        self.timeline_var = tk.DoubleVar(value=0.0)
+        self.timeline_label_var = tk.StringVar(value="t = 0")
         self.system_metadata = {"source": "Built-in preset", "epoch": None, "names": []}
         self.initial_snapshot = None
         self.last_reference_report = ""
@@ -132,7 +140,7 @@ class GravityLabApp:
         for i, name_var in enumerate(self.body_name_vars):
             name_var.trace_add("write", lambda *_args, idx=i: self._update_body_title(idx))
         self.metric_vars = [tk.StringVar(value="g: — | escape: — | density: —") for _ in range(3)]
-        self.status_var = tk.StringVar(value="Starting simulation…")
+        self.status_var = tk.StringVar(value="Paused — press Play to start.")
         self.event_var = tk.StringVar(value="No events yet.")
         self.speed_label_var = tk.StringVar(value="1.0×")
         self.display_scale_label_var = tk.StringVar(value="Visual body scale: 1.8×")
@@ -277,9 +285,43 @@ class GravityLabApp:
         dialog.title("Advanced physics models")
         dialog.transient(self.root)
         dialog.geometry("900x730")
-        dialog.minsize(820, 650)
-        frame = ttk.Frame(dialog, padding=14)
-        frame.pack(fill=tk.BOTH, expand=True)
+        dialog.minsize(640, 420)
+
+        # Put the entire settings form in a canvas so the dialog remains usable
+        # on smaller displays and at higher Windows display scaling. Bind wheel
+        # events to the canvas/content, not globally, so other app widgets keep
+        # their normal scrolling behavior.
+        container = ttk.Frame(dialog)
+        container.pack(fill=tk.BOTH, expand=True)
+        canvas = tk.Canvas(container, highlightthickness=0, borderwidth=0)
+        scrollbar = ttk.Scrollbar(container, orient=tk.VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        frame = ttk.Frame(canvas, padding=14)
+        content_window = canvas.create_window((0, 0), window=frame, anchor="nw")
+
+        def update_scroll_region(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            # Keep the form the same width as the visible canvas.
+            canvas.itemconfigure(content_window, width=max(1, canvas.winfo_width()))
+
+        def scroll_with_wheel(event):
+            if getattr(event, "num", None) == 4:  # X11 wheel up
+                canvas.yview_scroll(-3, "units")
+            elif getattr(event, "num", None) == 5:  # X11 wheel down
+                canvas.yview_scroll(3, "units")
+            elif getattr(event, "delta", 0):  # Windows/macOS wheel
+                amount = -1 * int(event.delta / 120) if abs(event.delta) >= 120 else (-1 if event.delta > 0 else 1)
+                canvas.yview_scroll(amount * 3, "units")
+            return "break"
+
+        frame.bind("<Configure>", update_scroll_region)
+        canvas.bind("<Configure>", update_scroll_region)
+        for widget in (canvas, frame):
+            widget.bind("<MouseWheel>", scroll_with_wheel, add="+")
+            widget.bind("<Button-4>", scroll_with_wheel, add="+")
+            widget.bind("<Button-5>", scroll_with_wheel, add="+")
         ttk.Label(frame, text="ADVANCED PHYSICS", style="Title.TLabel").pack(anchor="w")
         ttk.Label(frame,
                   text="These optional models are approximations. Enable only the effects relevant to your experiment; 1PN and tides require RK45.",
@@ -574,6 +616,9 @@ class GravityLabApp:
                                     "epoch": None, "names": [body.name for body in state.bodies]}
             self.history = History(maxlen=2200)
             self.history.push(engine)
+            self._timeline = []
+            self._timeline_index = 0
+            self._record_timeline_state(force=True)
             self.scene.reset_trails(engine.pos, max_trails=self.trail_count)
             self.scene.push_positions(engine.pos, engine.alive)
             self._apply_display_options()
@@ -836,6 +881,16 @@ class GravityLabApp:
         ttk.Scale(toolbar, from_=0.1, to=5.0, variable=self.speed_var, orient=tk.HORIZONTAL,
                   length=115, command=self._on_speed).pack(side=tk.LEFT, padx=(0, 4))
         ttk.Label(toolbar, textvariable=self.speed_label_var, style="Panel.TLabel", width=13).pack(side=tk.LEFT)
+
+        timeline_bar = ttk.Frame(outer, style="Panel.TFrame", padding=(8, 4))
+        timeline_bar.pack(fill=tk.X, pady=(0, 8))
+        ttk.Button(timeline_bar, text="Step −", command=self._step_backward).pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Button(timeline_bar, text="Step +", command=self._step_forward).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Label(timeline_bar, text="Timeline", style="Panel.TLabel").pack(side=tk.LEFT, padx=(0, 6))
+        self.timeline_scale = ttk.Scale(timeline_bar, from_=0, to=0, variable=self.timeline_var,
+                                        orient=tk.HORIZONTAL, command=self._on_timeline_seek)
+        self.timeline_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+        ttk.Label(timeline_bar, textvariable=self.timeline_label_var, style="Panel.TLabel", width=22).pack(side=tk.RIGHT, padx=(8, 0))
 
         # The horizontal sash makes the setup panel independently resizable.
         content = ttk.Panedwindow(outer, orient=tk.HORIZONTAL)
@@ -1630,7 +1685,11 @@ class GravityLabApp:
                                     [b.position for b in model_state.bodies])
         self.event_var.set("Warning: " + overlaps[0] if overlaps else "No events yet.")
         self._refresh_event_log()
-        self.running = True
+        # A newly created or reset system must remain paused until the user presses Play.
+        self.running = False
+        self._timeline = []
+        self._timeline_index = 0
+        self._record_timeline_state(force=True)
         self._dirty = False
         self._render_once(force_field=True)
         self._update_status()
@@ -1691,6 +1750,7 @@ class GravityLabApp:
             display_frame = self._display_frame()
             self.scene.push_positions(display_frame.pos, self.engine.alive)
             self.history.push(self.engine)
+            self._record_timeline_state()
             if self.engine.events and (len(self.engine.events) > self._last_event_seen
                                         or self.engine.events[-1] != self._last_event_signature):
                 self.event_var.set(self._friendly_event(self.engine.events[-1][1]))
@@ -1782,9 +1842,10 @@ class GravityLabApp:
         min_sep = minimum_active_pair_separation(self.engine.pos, self.engine.alive)
         min_sep_text = format_finite(min_sep, ".4g") if min_sep is not None else "N/A (fewer than two valid active bodies)"
         active_count = int(np.count_nonzero(self.engine.alive))
+        unit_t = "yr" if self.units_var.get() == ASTRO else "T"
+        self.timeline_label_var.set(f"t = {format_finite(self.engine.t, '.8g')} {unit_t}  ·  {self._timeline_index + 1}/{max(1, len(self._timeline))}")
         state = ("STOPPED: numerical issue — reduce Δt or tighten validation, then reset" if self.failed
                  else ("RUNNING" if self.running else ("IMPACT PAUSE" if self.engine.impact else "PAUSED")))
-        unit_t = "yr" if self.units_var.get() == ASTRO else "T"
         energy = format_finite(self.engine.energy_error())
         angmom = format_finite(self.engine.angular_momentum_error())
         momentum = format_finite(self.engine.momentum_error())
@@ -1943,10 +2004,89 @@ class GravityLabApp:
     def _toggle_running(self):
         if self.failed:
             return
+        if not self.running and self._timeline and self._timeline_index < len(self._timeline) - 1:
+            # Branching from a rewound state discards the old future.
+            self._timeline = self._timeline[:self._timeline_index + 1]
+            self._update_timeline_widget()
         self.running = not self.running
         if self.engine and self.engine.impact and self.running:
             self.engine.impact = False
         self._update_status()
+
+    def _record_timeline_state(self, force=False):
+        """Keep bounded deep copies of complete engine states for deterministic rewind."""
+        if self.engine is None:
+            return
+        if not force and self._timeline and abs(float(self._timeline[-1].t) - float(self.engine.t)) <= 1e-15:
+            return
+        self._timeline.append(copy.deepcopy(self.engine))
+        if len(self._timeline) > self._timeline_maxlen:
+            self._timeline.pop(0)
+        self._timeline_index = len(self._timeline) - 1
+        self._update_timeline_widget()
+
+    def _update_timeline_widget(self):
+        if not hasattr(self, "timeline_scale"):
+            return
+        self._timeline_updating = True
+        try:
+            maximum = max(0, len(self._timeline) - 1)
+            self.timeline_scale.configure(from_=0, to=maximum)
+            self.timeline_var.set(float(self._timeline_index))
+            if self.engine is not None:
+                unit_t = "yr" if self.units_var.get() == ASTRO else "T"
+                self.timeline_label_var.set(f"t = {format_finite(self.engine.t, '.8g')} {unit_t}  ·  {self._timeline_index + 1}/{max(1, len(self._timeline))}")
+        finally:
+            self._timeline_updating = False
+
+    def _restore_timeline_index(self, index):
+        if not self._timeline:
+            return
+        index = max(0, min(len(self._timeline) - 1, int(round(index))))
+        self.running = False
+        self._timeline_index = index
+        self.engine = copy.deepcopy(self._timeline[index])
+        self.simulation_service.restore_engine(self.engine)
+        self.engine = self.simulation_service.engine
+        self.failed = not self.engine.is_healthy()
+        self.history = History(maxlen=2200)
+        self.history.push(self.engine)
+        self._closest_approach = {}
+        self.scene.reset_trails(self._display_frame().pos, self.trail_count)
+        self.scene.update(self._display_frame(), force_field=True)
+        self._update_metrics()
+        self._refresh_event_log()
+        self._update_graphs()
+        self._update_timeline_widget()
+        self._dirty = True
+        self._render_once(force_field=True)
+        self._update_status()
+
+    def _on_timeline_seek(self, value):
+        if self._timeline_updating or not self._timeline:
+            return
+        index = int(round(float(value)))
+        if index != self._timeline_index:
+            self._restore_timeline_index(index)
+
+    def _step_backward(self):
+        self._restore_timeline_index(self._timeline_index - 1)
+
+    def _step_forward(self):
+        if self.running:
+            return
+        if self._timeline_index < len(self._timeline) - 1:
+            self._restore_timeline_index(self._timeline_index + 1)
+        elif self.engine is not None and not self.failed:
+            self.controller.advance(steps=1, dt=self.dt, method=self.integrator_var.get(),
+                                    adaptive=self.adaptive_var.get(), max_wall=0.05)
+            self.engine = self.simulation_service.engine
+            self.history.push(self.engine)
+            self._record_timeline_state(force=True)
+            self.scene.push_positions(self._display_frame().pos, self.engine.alive)
+            self._render_once()
+            self._update_graphs()
+            self._update_status()
 
     def _fit_camera(self):
         if self.engine is not None:
