@@ -86,6 +86,8 @@ class GravityLabApp:
         self.theme_var = tk.StringVar(value="Dark")
         self.view_mode_var = tk.StringVar(value="3D")
         self.camera_focus_var = tk.StringVar(value="System center")
+        self.camera_view_preset_var = tk.StringVar(value="Free orbit")
+        self.visual_preset_var = tk.StringVar(value="Custom")
         self.reference_frame_var = tk.StringVar(value="Inertial frame")
         self._camera_follow_position = None
         # Optional physics extensions. These are disabled by default so the
@@ -125,6 +127,8 @@ class GravityLabApp:
         self.accel_var = tk.BooleanVar(value=False)
         self.com_var = tk.BooleanVar(value=True)
         self.speed_var = tk.DoubleVar(value=1.0)
+        for _visual_var in (self.trail_var, self.floor_var, self.axes_var, self.shells_var, self.field_var, self.accel_var):
+            _visual_var.trace_add("write", self._mark_visualization_custom)
         self.display_scale_var = tk.DoubleVar(value=1.8)
         self.body_vars = [[tk.StringVar(value="0") for _ in BODY_FIELDS] for _ in range(3)]
         self.body_name_vars = [tk.StringVar(value=name.title()) for name in BODY_NAMES]
@@ -631,7 +635,7 @@ class GravityLabApp:
             messagebox.showerror("Checkpoint load failed", str(exc), parent=self.root)
 
     def _open_horizons_import_dialog(self):
-        from ..ephemeris import SOLAR_SYSTEM_BODIES
+        from ..ephemeris import SOLAR_SYSTEM_BODIES, validate_horizons_epoch
         dialog = tk.Toplevel(self.root)
         dialog.title("Import NASA/JPL Horizons state vectors")
         dialog.transient(self.root)
@@ -639,23 +643,25 @@ class GravityLabApp:
         frame = ttk.Frame(dialog, padding=14)
         frame.pack(fill=tk.BOTH, expand=True)
         ttk.Label(frame, text="Import a real Solar System state at one epoch", style="Title.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
-        ttk.Label(frame, text="Vectors use the SSB origin, ecliptic plane, AU and AU/day; velocities are converted to AU/year.",
-                  wraplength=470, style="Sub.TLabel").grid(row=1, column=0, columnspan=2, sticky="w", pady=(5, 10))
+        ttk.Label(frame, text="Vectors are queried from NASA/JPL Horizons at a TDB epoch, in the ecliptic plane with SSB origin. Positions use AU; fetched velocities in AU/day are converted to AU/year.",
+                  wraplength=510, style="Sub.TLabel").grid(row=1, column=0, columnspan=2, sticky="w", pady=(5, 6))
+        ttk.Label(frame, text="Important: after import, Gravity Lab evolves only these three bodies. Other planets and the rest of the Solar System will no longer perturb them.",
+                  wraplength=510, style="Sub.TLabel").grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 8))
         epoch_var = tk.StringVar(value=datetime.now(timezone.utc).strftime("%Y-%m-%d"))
-        ttk.Label(frame, text="Epoch in TDB (date or date + HH:MM)").grid(row=2, column=0, sticky="w", padx=(0, 10))
-        ttk.Entry(frame, textvariable=epoch_var, width=24).grid(row=2, column=1, sticky="ew", pady=3)
+        ttk.Label(frame, text="Epoch in TDB (YYYY-MM-DD or YYYY-MM-DD HH:MM)").grid(row=3, column=0, sticky="w", padx=(0, 10))
+        ttk.Entry(frame, textvariable=epoch_var, width=24).grid(row=3, column=1, sticky="ew", pady=3)
         choices = list(SOLAR_SYSTEM_BODIES)
         defaults = ("Sun", "Earth", "Jupiter")
         body_vars = []
         for i in range(3):
             var = tk.StringVar(value=defaults[i])
             body_vars.append(var)
-            ttk.Label(frame, text=f"Body {i+1}").grid(row=3+i, column=0, sticky="w", padx=(0, 10))
-            ttk.Combobox(frame, textvariable=var, values=choices, state="readonly", width=22).grid(row=3+i, column=1, sticky="ew", pady=3)
+            ttk.Label(frame, text=f"Body {i+1}").grid(row=4+i, column=0, sticky="w", padx=(0, 10))
+            ttk.Combobox(frame, textvariable=var, values=choices, state="readonly", width=22).grid(row=4+i, column=1, sticky="ew", pady=3)
         status = tk.StringVar(value="Requires an internet connection to query JPL Horizons.")
-        ttk.Label(frame, textvariable=status, wraplength=470).grid(row=6, column=0, columnspan=2, sticky="w", pady=(8, 8))
+        ttk.Label(frame, textvariable=status, wraplength=510).grid(row=7, column=0, columnspan=2, sticky="w", pady=(8, 8))
         buttons = ttk.Frame(frame)
-        buttons.grid(row=7, column=0, columnspan=2, sticky="ew")
+        buttons.grid(row=8, column=0, columnspan=2, sticky="ew")
         ttk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side=tk.RIGHT, padx=(6, 0))
         fetch_button = ttk.Button(buttons, text="Fetch and apply", command=lambda: start_fetch())
         fetch_button.pack(side=tk.RIGHT)
@@ -667,13 +673,18 @@ class GravityLabApp:
             if len(set(names)) != 3:
                 messagebox.showerror("Choose three different bodies", "Each of the three selected bodies must be different.", parent=dialog)
                 return
+            try:
+                epoch = validate_horizons_epoch(epoch)
+            except ValueError as exc:
+                messagebox.showerror("Invalid epoch", str(exc), parent=dialog)
+                return
             fetch_button.configure(state=tk.DISABLED)
             status.set("Contacting JPL Horizons… this can take a few seconds.")
             def worker():
                 try:
                     from ..ephemeris import fetch_three_body_horizons
                     result = fetch_three_body_horizons(names, epoch)
-                    self.root.after(0, lambda result=result: self._apply_horizons_import(result, dialog))
+                    self.root.after(0, lambda result=result: self._preview_horizons_import(result, dialog, status, fetch_button))
                 except Exception as exc:
                     error = str(exc)
                     self.root.after(0, lambda error=error: failed(error))
@@ -685,6 +696,44 @@ class GravityLabApp:
         dialog.bind("<Return>", lambda _e: start_fetch())
         dialog.grab_set()
         dialog.focus_set()
+
+    def _preview_horizons_import(self, result, dialog=None, status=None, fetch_button=None):
+        """Show fetched JPL vectors and units before replacing the active system."""
+        if dialog is not None:
+            try:
+                if not dialog.winfo_exists():
+                    return
+            except tk.TclError:
+                return
+        if status is not None:
+            status.set("Fetched successfully. Review the state vectors before applying.")
+        if fetch_button is not None:
+            fetch_button.configure(state=tk.NORMAL)
+        preview = tk.Toplevel(self.root)
+        preview.title("Review JPL Horizons states")
+        preview.transient(dialog or self.root)
+        preview.geometry("780x360")
+        frame = ttk.Frame(preview, padding=12)
+        frame.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(frame, text=f"Epoch: {result.epoch} TDB  ·  Frame: {result.reference_frame}", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(frame, text="COM-centred selected trio. Position: AU · Velocity: AU/year · Mass: solar masses · Physical radius: AU.", style="Sub.TLabel", wraplength=740).pack(anchor="w", pady=(4, 8))
+        columns = ("body", "mass", "radius", "x", "y", "z", "vx", "vy", "vz")
+        tree = ttk.Treeview(frame, columns=columns, show="headings", height=4)
+        labels = {"body":"Body", "mass":"Mass (M☉)", "radius":"Radius (AU)", "x":"X (AU)", "y":"Y (AU)", "z":"Z (AU)", "vx":"VX (AU/yr)", "vy":"VY (AU/yr)", "vz":"VZ (AU/yr)"}
+        for col in columns:
+            tree.heading(col, text=labels[col])
+            tree.column(col, width=82 if col != "body" else 90, anchor="w")
+        for i, name in enumerate(result.names):
+            values = [name, f"{result.masses[i]:.7g}", f"{result.radii[i]:.7g}", *[f"{v:.7g}" for v in result.positions[i]], *[f"{v:.7g}" for v in result.velocities[i]]]
+            tree.insert("", "end", values=values)
+        tree.pack(fill=tk.X, expand=False)
+        ttk.Label(frame, text="Applying replaces the current setup and resets simulation time. The imported system is then isolated; omitted planets will not continue to perturb it.", wraplength=740).pack(anchor="w", pady=10)
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill=tk.X, side=tk.BOTTOM)
+        ttk.Button(buttons, text="Cancel", command=preview.destroy).pack(side=tk.RIGHT, padx=(6, 0))
+        ttk.Button(buttons, text="Apply these states", command=lambda: (preview.destroy(), self._apply_horizons_import(result, dialog))).pack(side=tk.RIGHT)
+        preview.grab_set()
+        preview.focus_set()
 
     def _apply_horizons_import(self, result, dialog=None):
         # If the user cancelled/closed the import dialog while the request was in
@@ -973,6 +1022,24 @@ class GravityLabApp:
         self.momentum_graph = self.diagnostic_graphs["Momentum drift"]
         self.angular_momentum_graph = self.diagnostic_graphs["Angular momentum"]
 
+        # Phase 7: compact scientific health summary and actionable warnings.
+        summary_tab = ttk.Frame(self.diagnostics_notebook, style="Panel.TFrame", padding=10)
+        self.diagnostics_notebook.add(summary_tab, text="Scientific summary")
+        ttk.Label(summary_tab, text="SCIENTIFIC HEALTH", style="Panel.TLabel",
+                  font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(0, 8))
+        self.science_summary_var = tk.StringVar(value="Waiting for simulation state…")
+        self.science_summary_label = ttk.Label(
+            summary_tab, textvariable=self.science_summary_var, style="Panel.TLabel",
+            justify=tk.LEFT, anchor="nw", wraplength=900
+        )
+        self.science_summary_label.pack(fill=tk.BOTH, expand=True, anchor="nw")
+        summary_buttons = ttk.Frame(summary_tab, style="Panel.TFrame")
+        summary_buttons.pack(fill=tk.X, side=tk.BOTTOM, pady=(8, 0))
+        ttk.Button(summary_buttons, text="Export diagnostic graphs…",
+                   command=self._export_diagnostic_graphs).pack(side=tk.LEFT)
+        ttk.Label(summary_buttons, text="Warnings are advisory; interpret them in the context of the selected physics model.",
+                  style="Muted.TLabel").pack(side=tk.LEFT, padx=10)
+
         events_tab = ttk.Frame(self.diagnostics_notebook, style="Panel.TFrame", padding=4)
         self.diagnostics_notebook.add(events_tab, text="Collision events")
         self.event_text = tk.Text(events_tab, height=5, wrap=tk.WORD, relief=tk.FLAT,
@@ -1180,11 +1247,14 @@ class GravityLabApp:
 
     @staticmethod
     def _add_combo_row(parent, row, label, variable, values, callback=None):
-        ttk.Label(parent, text=label, style="Panel.TLabel").grid(row=row, column=0, sticky="w", padx=(0, 6), pady=2)
-        combo = ttk.Combobox(parent, textvariable=variable, values=values, state="readonly", width=26)
+        ttk.Label(parent, text=label, style="Panel.TLabel", wraplength=150,
+                  justify=tk.LEFT).grid(row=row, column=0, sticky="ew", padx=(0, 6), pady=2)
+        combo = ttk.Combobox(parent, textvariable=variable, values=values, state="readonly", width=12)
         combo.grid(row=row, column=1, sticky="ew", pady=2)
         if callback:
             combo.bind("<<ComboboxSelected>>", lambda _e: callback())
+        parent.columnconfigure(0, weight=0, minsize=155)
+        parent.columnconfigure(1, weight=1, minsize=100)
         return combo
 
     def apply_theme_widgets(self):
@@ -1294,6 +1364,64 @@ class GravityLabApp:
         self._dirty = True
         if not self.running:
             self._render_once(force_field=True)
+
+    # ---- Phase 9: camera and visualization presets -------------------------------
+    CAMERA_VIEW_PRESETS = ("Free orbit", "Top (XY)", "Front (XZ)", "Side (YZ)")
+    VISUAL_PRESETS = ("Custom", "Orbit study", "Gravity field", "Influence zones", "Clean view")
+
+    def _apply_camera_view_preset(self, _event=None):
+        """Set a stable orthographic camera direction while preserving zoom and focus."""
+        if not hasattr(self, "scene"):
+            return
+        camera = self.scene.renderer.GetActiveCamera()
+        position = np.asarray(camera.GetPosition(), dtype=float)
+        focal = np.asarray(camera.GetFocalPoint(), dtype=float)
+        distance = max(float(np.linalg.norm(position - focal)), 1e-6)
+        choice = self.camera_view_preset_var.get()
+        directions = {
+            "Top (XY)": (np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0])),
+            "Front (XZ)": (np.array([0.0, -1.0, 0.0]), np.array([0.0, 0.0, 1.0])),
+            "Side (YZ)": (np.array([1.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0])),
+        }
+        if choice == "Free orbit":
+            direction = np.array([1.0, -1.0, 0.75], dtype=float)
+            direction /= np.linalg.norm(direction)
+            view_up = np.array([0.0, 0.0, 1.0])
+        else:
+            direction, view_up = directions[choice]
+        camera.SetPosition(*(focal + direction * distance))
+        camera.SetFocalPoint(*focal)
+        camera.SetViewUp(*view_up)
+        camera.OrthogonalizeViewUp()
+        self.scene.renderer.ResetCameraClippingRange()
+        self._camera_follow_position = None
+        self._dirty = True
+        self._render_once()
+
+    def _apply_visualization_preset(self, _event=None):
+        """Apply a named combination of visualization toggles; physics is untouched."""
+        choice = self.visual_preset_var.get()
+        presets = {
+            "Orbit study": dict(trail=True, floor=False, shells=False, axes=True, field=False, accel=False),
+            "Gravity field": dict(trail=False, floor=False, shells=False, axes=True, field=True, accel=False),
+            "Influence zones": dict(trail=True, floor=False, shells=True, axes=True, field=False, accel=False),
+            "Clean view": dict(trail=False, floor=False, shells=False, axes=False, field=False, accel=False),
+        }
+        if choice not in presets:
+            return
+        values = presets[choice]
+        self.trail_var.set(values["trail"])
+        self.floor_var.set(values["floor"])
+        self.shells_var.set(values["shells"])
+        self.axes_var.set(values["axes"])
+        self.field_var.set(values["field"])
+        self.accel_var.set(values["accel"])
+        self._apply_display_options()
+        self.visual_preset_var.set(choice)
+
+    def _mark_visualization_custom(self, *_args):
+        if hasattr(self, "visual_preset_var"):
+            self.visual_preset_var.set("Custom")
 
     # ---- per-body visual size (display only; never changes the physics) ------------
     SIZE_PRESETS = ("Custom (per body)", "Realistic (true scale)", "Exaggerated (×5)", "Uniform (equal size)")
@@ -1811,6 +1939,26 @@ class GravityLabApp:
             [list(self.history.angular_momentum_error)], labels=("ΔL/L₀",), logarithmic=True,
             x_values=time_values, x_label=f"Time ({unit_t})", y_label="Relative error (log₁₀)", event_times=event_times)
 
+    def _export_diagnostic_graphs(self):
+        """Export the current diagnostic plots as vector PostScript files."""
+        if not getattr(self, "diagnostic_graphs", None):
+            return
+        directory = filedialog.askdirectory(parent=self.root, title="Choose folder for diagnostic graph exports")
+        if not directory:
+            return
+        saved = []
+        try:
+            for label, graph in self.diagnostic_graphs.items():
+                safe = re.sub(r"[^A-Za-z0-9_-]+", "_", label).strip("_").lower()
+                path = os.path.join(directory, f"gravity_lab_{safe}.eps")
+                graph.postscript(file=path, colormode="color", pagewidth="7.5i", pageheight="4.5i")
+                saved.append(os.path.basename(path))
+            self.event_var.set(f"Exported {len(saved)} diagnostic graphs to {directory}")
+            messagebox.showinfo("Diagnostic export complete",
+                                "Saved vector graph files:\n" + "\n".join(saved), parent=self.root)
+        except (OSError, tk.TclError) as exc:
+            messagebox.showerror("Diagnostic export failed", str(exc), parent=self.root)
+
     def _friendly_event(self, message: str) -> str:
         """Replace generic engine body indexes with user-defined body names."""
         names = [v.get().strip() or f"Body {i + 1}" for i, v in enumerate(self.body_name_vars)]
@@ -1881,6 +2029,38 @@ class GravityLabApp:
                 f"closest={format_finite(closest, '.4g')} @ t={format_finite(closest_time, '.4g')} {unit_t}")
         frame_name = self.reference_frame_var.get()
         relative_summary = "\nRelative motion — " + (" | ".join(relative_lines) if relative_lines else "no active body pairs")
+        # Flag close approaches using physical collision radii, not rendered sphere sizes.
+        close_warnings = []
+        for i in range(3):
+            if not self.engine.alive[i]:
+                continue
+            for j in range(i + 1, 3):
+                if not self.engine.alive[j]:
+                    continue
+                separation = float(np.linalg.norm(self.engine.pos[j] - self.engine.pos[i]))
+                contact = float(self.engine.R[i] + self.engine.R[j])
+                if math.isfinite(separation) and contact > 0 and separation <= 3.0 * contact:
+                    close_warnings.append(f"{names[i]}–{names[j]} at {separation/contact:.2f}× contact distance")
+        drift_warnings = []
+        if math.isfinite(self.engine.energy_error()) and abs(self.engine.energy_error()) > 1e-3:
+            drift_warnings.append("energy drift exceeds 1e-3")
+        if math.isfinite(self.engine.momentum_error()) and abs(self.engine.momentum_error()) > 1e-6:
+            drift_warnings.append("linear momentum drift exceeds 1e-6")
+        if math.isfinite(self.engine.angular_momentum_error()) and abs(self.engine.angular_momentum_error()) > 1e-3:
+            drift_warnings.append("angular momentum drift exceeds 1e-3")
+        warnings = close_warnings + drift_warnings
+        health = "ADVISORY: " + "; ".join(warnings) if warnings else "No diagnostic thresholds currently exceeded."
+        if hasattr(self, "science_summary_var"):
+            self.science_summary_var.set(
+                f"Simulation: {state}\nTime: {format_finite(self.engine.t, '.8g')} {unit_t}\n"
+                f"Active bodies: {active_count}/3\n\n"
+                f"Conservation diagnostics\n  Relative energy error: {energy}\n"
+                f"  Linear momentum error: {momentum}\n  Angular momentum error: {angmom}\n"
+                f"  Minimum active separation: {min_sep_text} {distance_unit}\n\n"
+                f"Closest sampled approaches\n  " + ("\n  ".join(relative_lines) if relative_lines else "No active body pairs") +
+                f"\n\nHealth assessment\n  {health}\n\n"
+                "Thresholds are heuristic alerts, not proof of numerical failure. 1PN energy omits the 1PN Hamiltonian; collision and tidal models can change conserved quantities."
+            )
         self.status_var.set(
             f"{state} [{self.view_mode_var.get()}]  ·  t = {format_finite(self.engine.t, '.5g')} {unit_t}  ·  active bodies = {active_count}/3\n"
             f"|ΔE/E₀| = {energy}  ·  |ΔL/L₀| = {angmom}  ·  ΔP/P₀ = {momentum}  ·  minimum separation = {min_sep_text}{rk_note}\n"

@@ -119,3 +119,16 @@ def test_fetch_moon_uses_horizons_moon_target_id(monkeypatch):
     assert state.name == "Moon"
     assert state.target_id == "301"
     assert state.mass_solar == SOLAR_SYSTEM_BODIES["Moon"]["mass"]
+
+
+def test_validate_horizons_epoch_accepts_date_and_datetime():
+    from gravity_lab.ephemeris import validate_horizons_epoch
+    assert validate_horizons_epoch("2026-10-25") == "2026-10-25 00:00"
+    assert validate_horizons_epoch("2026-10-25 13:05") == "2026-10-25 13:05"
+
+
+@pytest.mark.parametrize("epoch", ["2026-02-30", "2026-10-25 25:00", "2026-10-25 12:61", "tomorrow", "2026-1-5"])
+def test_validate_horizons_epoch_rejects_invalid_calendar_values(epoch):
+    from gravity_lab.ephemeris import validate_horizons_epoch
+    with pytest.raises(ValueError, match="Epoch must be a valid"):
+        validate_horizons_epoch(epoch)

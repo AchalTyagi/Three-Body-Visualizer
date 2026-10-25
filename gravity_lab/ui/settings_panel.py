@@ -108,15 +108,18 @@ def build_settings_panel(app, side) -> None:
                   ("Trail points", app.trail_len_var), ("Bounce restitution", app.restitution_var)]
     row = 1
     for label, var in field_rows:
-        ttk.Label(settings, text=label, style="Panel.TLabel").grid(row=row, column=0, sticky="w", padx=(0, 6), pady=2)
-        ent = ttk.Entry(settings, textvariable=var, width=13)
-        ent.grid(row=row, column=1, sticky="e", pady=2)
+        ttk.Label(settings, text=label, style="Panel.TLabel", wraplength=150,
+                  justify=tk.LEFT).grid(row=row, column=0, sticky="ew", padx=(0, 6), pady=2)
+        ent = ttk.Entry(settings, textvariable=var, width=10)
+        ent.grid(row=row, column=1, sticky="ew", pady=2)
         ent.bind("<Return>", lambda _e: app._apply_reset())
         row += 1
     app._add_combo_row(settings, row, "Integrator", app.integrator_var, INTEGRATORS); row += 1
     app._add_combo_row(settings, row, "Collision behavior", app.collision_var, COLLISION_MODES); row += 1
     app._add_combo_row(settings, row, "Influence shell", app.zone_mode_var, ZONE_MODES)
-    settings.columnconfigure(0, weight=1)
+    # Reserve enough width for readable labels and let controls shrink gracefully.
+    settings.columnconfigure(0, weight=0, minsize=155)
+    settings.columnconfigure(1, weight=1, minsize=100)
 
     display = ttk.LabelFrame(side, text="3D display", padding=7)
     display.pack(fill=tk.X, pady=4)
@@ -130,6 +133,16 @@ def build_settings_panel(app, side) -> None:
                       ("Show acceleration vectors", app.accel_var),
                       ("Center initial system on center of mass", app.com_var)):
         ttk.Checkbutton(display, text=text, variable=var, command=app._apply_display_options).pack(anchor="w", pady=1)
+    ttk.Label(display, text="Camera view preset", style="Panel.TLabel").pack(anchor="w", pady=(5, 1))
+    camera_view_combo = ttk.Combobox(display, textvariable=app.camera_view_preset_var,
+                                     values=app.CAMERA_VIEW_PRESETS, state="readonly")
+    camera_view_combo.pack(fill=tk.X)
+    camera_view_combo.bind("<<ComboboxSelected>>", app._apply_camera_view_preset)
+    ttk.Label(display, text="Visualization preset", style="Panel.TLabel").pack(anchor="w", pady=(5, 1))
+    visual_preset_combo = ttk.Combobox(display, textvariable=app.visual_preset_var,
+                                       values=app.VISUAL_PRESETS, state="readonly")
+    visual_preset_combo.pack(fill=tk.X)
+    visual_preset_combo.bind("<<ComboboxSelected>>", app._apply_visualization_preset)
     ttk.Label(display, textvariable=app.display_scale_label_var, style="Panel.TLabel").pack(anchor="w", pady=(5, 0))
     ttk.Scale(display, from_=0.5, to=24.0, variable=app.display_scale_var, orient=tk.HORIZONTAL,
               command=app._on_display_scale).pack(fill=tk.X)

@@ -348,3 +348,21 @@ The existing trail system records the displayed coordinates, so changing the ref
 - Press Play after rewinding to branch from that point; previously recorded future states are discarded.
 - The timeline retains up to 1,800 recorded frame states in memory. This is an in-session playback history, separate from the existing exact checkpoint save/load feature. Restarting the application does not persist the timeline history.
 - The timeline's time label uses years for astronomical units and model-time units for arbitrary systems.
+
+### Phase 8 — JPL Horizons import review
+
+The Horizons import validates the requested TDB epoch, displays the coordinate frame and units, and presents a state-vector preview before replacing the active system. Imported positions are expressed in AU and velocities in AU/year after conversion from the Horizons AU/day response. The selected trio is recentered to its center-of-mass frame and then simulated in isolation; omitted planets are not continued as perturbing bodies. See `docs/phase8-jpl-horizons-improvements.md`.
+
+### Phase 9 and Phase 10 — Visualization & release reliability
+
+The visualization panel now offers camera-angle presets (Free orbit, Top XY, Front XZ, Side YZ) and display presets (Orbit study, Gravity field, Influence zones, Clean view). These presets change rendering options only; they do not modify simulation physics. Settings labels wrap in narrow sidebars, and the control column resizes to prevent truncation on smaller windows and high-DPI displays.
+
+See [`docs/phase9-phase10-release.md`](docs/phase9-phase10-release.md) for the manual release checklist and regression checks. Before a release, run:
+
+```bash
+python -m compileall -q gravity_lab main.py
+python -m pytest -q
+python main.py --selftest
+```
+
+Native Windows validation is still recommended for Tk/VTK viewport interaction, DPI scaling, resizing, and camera wheel behavior.

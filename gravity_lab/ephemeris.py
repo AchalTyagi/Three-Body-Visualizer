@@ -9,7 +9,7 @@ model; omitted planets are not kept as external perturbing bodies.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 import json
 import math
 import re
@@ -95,19 +95,30 @@ def parse_horizons_vectors(result_text: str) -> tuple[np.ndarray, np.ndarray]:
     return position, velocity
 
 
+
+def validate_horizons_epoch(epoch: str) -> str:
+    """Validate and normalize a Horizons calendar epoch (TDB interpretation).
+
+    Accepted forms are YYYY-MM-DD and YYYY-MM-DD HH:MM. Horizons interprets
+    the submitted calendar time as TDB through TIME_TYPE.
+    """
+    value = str(epoch).strip()
+    for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M"):
+        try:
+            parsed = datetime.strptime(value, fmt)
+            # strptime is permissive about some zero-padding; enforce canonical input.
+            if parsed.strftime(fmt) == value:
+                return value if fmt.endswith("%M") else value + " 00:00"
+        except ValueError:
+            pass
+    raise ValueError("Epoch must be a valid YYYY-MM-DD date or YYYY-MM-DD HH:MM time (TDB).")
+
+
 def fetch_horizons_body(name: str, epoch: str, timeout: float = 20.0) -> HorizonsBodyState:
     """Fetch a single body's geometric SSB state from the official JPL Horizons API."""
     if name not in SOLAR_SYSTEM_BODIES:
         raise ValueError(f"Unsupported Solar System body: {name!r}.")
-    try:
-        # Validate the date and normalise to a stable ISO timestamp for TLIST.
-        if len(epoch.strip()) == 10:
-            parsed_epoch = date.fromisoformat(epoch.strip()).isoformat() + " 00:00"
-        else:
-            date.fromisoformat(epoch.strip()[:10])
-            parsed_epoch = epoch.strip()
-    except Exception as exc:
-        raise ValueError("Epoch must be YYYY-MM-DD or YYYY-MM-DD HH:MM.") from exc
+    parsed_epoch = validate_horizons_epoch(epoch)
     target = SOLAR_SYSTEM_BODIES[name]
     params = {
         "format": "json",
@@ -169,6 +180,6 @@ def fetch_three_body_horizons(names, epoch: str, timeout: float = 20.0) -> Horiz
     positions -= np.sum(masses[:, None] * positions, axis=0) / total_mass
     velocities -= np.sum(masses[:, None] * velocities, axis=0) / total_mass
     return HorizonsImport(
-        epoch=epoch.strip(), names=names, masses=masses, radii=radii,
+        epoch=validate_horizons_epoch(epoch), names=names, masses=masses, radii=radii,
         positions=positions, velocities=velocities,
     )
