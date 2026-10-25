@@ -156,3 +156,27 @@ def test_history_records_angular_momentum_drift_and_keeps_missing_pairs_nonfinit
     history.push(engine)
     assert all(np.isnan(series[-1]) for series in history.separations)
     assert len(history.angular_momentum_error) == 2
+
+
+def test_pause_on_impact_rearms_after_separation():
+    from gravity_lab.physics import STOP
+    engine = ThreeBodyEngine(
+        [1, 1, 1], [0.4, 0.4, 0.1],
+        [[0, 0, 0], [1.0, 0, 0], [50, 0, 0]],
+        [[0.5, 0, 0], [0, 0, 0], [0, 0, 0]],
+        G=0.0, softening=0.0, collision=STOP,
+    )
+    engine.step(1.0, VERLET)
+    assert engine.impact and (0, 1) in engine._touching
+    engine.impact = False  # what the GUI does on resume
+    engine.step(0.5, VERLET)
+    assert not engine.impact  # no instant re-trigger while still overlapping
+    engine.step(5.0, VERLET)
+    assert not engine.impact and (0, 1) not in engine._touching  # re-armed after separation
+
+
+def test_gm_sun_derived_constants_are_consistent():
+    from gravity_lab.physics import G_AU_MSUN_YR, G_SI, GM_SUN_SI, MSUN_KG, YEAR_S, AU_M
+    assert math.isclose(MSUN_KG * G_SI, GM_SUN_SI, rel_tol=1e-14)
+    assert math.isclose(G_AU_MSUN_YR, GM_SUN_SI * YEAR_S**2 / AU_M**3, rel_tol=1e-14)
+    assert abs(G_AU_MSUN_YR - 4 * math.pi**2) / (4 * math.pi**2) < 1e-4

@@ -8,6 +8,8 @@ import os
 from dataclasses import replace
 import platform
 import re
+import logging
+import queue
 import threading
 import time
 from datetime import date, datetime, timezone
@@ -37,6 +39,8 @@ from ..themes import THEMES, BODY_COLORS, BODY_NAMES
 from ..preferences import load_preferences, save_preferences
 from .diagnostics_panel import SparkGraph, format_finite, minimum_active_pair_separation
 from ..orbital_analysis import barycentric_frame, pairwise_relative_metrics
+
+_LOG = logging.getLogger(__name__)
 
 BODY_FIELDS = ("Mass", "Radius", "x", "y", "z", "vx", "vy", "vz")
 CUSTOM_PRESET = "Custom / Build your own"
@@ -71,6 +75,8 @@ class GravityLabApp:
         self._last_fit_frame = 0
         self._closed = False
         self._tick_after_id = None
+        # Worker threads never touch Tk; they post callables here and the tick loop runs them.
+        self._ui_queue = queue.Queue()
         # Bounded in-memory timeline of complete engine states for reliable rewind.
         self._timeline = []
         self._timeline_index = 0
@@ -684,10 +690,10 @@ class GravityLabApp:
                 try:
                     from ..ephemeris import fetch_three_body_horizons
                     result = fetch_three_body_horizons(names, epoch)
-                    self.root.after(0, lambda result=result: self._preview_horizons_import(result, dialog, status, fetch_button))
+                    self._post_ui(lambda result=result: self._preview_horizons_import(result, dialog, status, fetch_button))
                 except Exception as exc:
                     error = str(exc)
-                    self.root.after(0, lambda error=error: failed(error))
+                    self._post_ui(lambda error=error: failed(error))
             def failed(error):
                 if dialog.winfo_exists():
                     status.set(f"Import failed: {error}")
@@ -848,7 +854,7 @@ class GravityLabApp:
             status.set("Running RK45 vs REBOUND IAS15…")
             def worker():
                 try:
-                    from .rebound_compare import compare_against_rebound
+                    from ..rebound_compare import compare_against_rebound
                     result = compare_against_rebound(snapshot["m"], snapshot["R"], snapshot["pos"], snapshot["vel"],
                         snapshot["G"], duration, samples, snapshot["softening"], snapshot["rtol"], snapshot["atol"])
                     report = ("REBOUND IAS15 vs Gravity Lab RK45\n"
@@ -859,10 +865,10 @@ class GravityLabApp:
                         f"Relative RMS difference: {result.relative_rms_error:.8e}\n"
                         f"Relative maximum difference: {result.relative_max_error:.8e}\n\n"
                         "This compares two numerical integrators for the same isolated, unsoftened point-mass model. It is not a comparison with real ephemerides.")
-                    self.root.after(0, lambda report=report: comparison_done(report))
+                    self._post_ui(lambda report=report: comparison_done(report))
                 except Exception as exc:
                     error = str(exc)
-                    self.root.after(0, lambda error=error: comparison_failed(error))
+                    self._post_ui(lambda error=error: comparison_failed(error))
             def comparison_done(report):
                 if dialog.winfo_exists():
                     self.last_reference_report = report
@@ -1703,6 +1709,7 @@ class GravityLabApp:
         self.threshold_var.set(_fmt(p["threshold"]))
         self.view_var.set(_fmt(p["view"]))
         self.collision_var.set(p["collision"])
+        self.restitution_var.set("1.0")  # presets do not define it; do not inherit the last experiment's value
         self.enable_oblateness_var.set(False)
         self.enable_1pn_var.set(False)
         self.enable_tides_var.set(False)
@@ -1851,10 +1858,48 @@ class GravityLabApp:
             return
         self._tick_after_id = self.root.after(16 if self.running else 80, self._tick)
 
+    def _post_ui(self, callback):
+        """Queue ``callback`` to run on the Tk thread; safe to call from worker threads."""
+        self._ui_queue.put(callback)
+
+    def _drain_ui_queue(self):
+        while True:
+            try:
+                callback = self._ui_queue.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                callback()
+            except Exception:
+                _LOG.exception("Deferred UI callback failed")
+
+    def _handle_engine_error(self, exc):
+        """Stop the simulation cleanly after a failed step instead of killing the tick loop."""
+        first_failure = not self.failed
+        self.failed = True
+        self.running = False
+        self._dirty = False
+        message = f"{type(exc).__name__}: {exc}"
+        if first_failure:
+            _LOG.error("Simulation step failed", exc_info=exc)
+        self.status_var.set(f"Simulation stopped ({message}). Reduce \u0394t, enable adaptive stepping or RK45, then reset.")
+        self.event_var.set(f"Simulation stopped: {message}")
+
     def _tick(self):
         self._tick_after_id = None
-        if self._closed or self.engine is None:
+        if self._closed:
             return
+        try:
+            self._drain_ui_queue()
+            if self.engine is not None:
+                self._tick_once()
+        except Exception as exc:
+            self._handle_engine_error(exc)
+        finally:
+            # Always keep the loop alive; a single bad frame must not freeze the window.
+            self._schedule_tick()
+
+    def _tick_once(self):
         self._frame += 1
         needs_scene_update = self.running or self._dirty
         if self.running and not self.failed:
@@ -1873,7 +1918,6 @@ class GravityLabApp:
             if self.engine is None:
                 self.running = False
                 self.status_var.set("Simulation service has no active engine. Reset to continue.")
-                self._schedule_tick()
                 return
             display_frame = self._display_frame()
             self.scene.push_positions(display_frame.pos, self.engine.alive)
@@ -1918,7 +1962,6 @@ class GravityLabApp:
             self._follow_camera_target()
             self.scene.render()
             self._dirty = False
-        self._schedule_tick()
 
     def _update_graphs(self):
         time_values = list(self.history.t)
@@ -2258,8 +2301,12 @@ class GravityLabApp:
         if self._timeline_index < len(self._timeline) - 1:
             self._restore_timeline_index(self._timeline_index + 1)
         elif self.engine is not None and not self.failed:
-            self.controller.advance(steps=1, dt=self.dt, method=self.integrator_var.get(),
-                                    adaptive=self.adaptive_var.get(), max_wall=0.05)
+            try:
+                self.controller.advance(steps=1, dt=self.dt, method=self.integrator_var.get(),
+                                        adaptive=self.adaptive_var.get(), max_wall=0.05)
+            except Exception as exc:
+                self._handle_engine_error(exc)
+                return
             self.engine = self.simulation_service.engine
             self.history.push(self.engine)
             self._record_timeline_state(force=True)
@@ -2278,7 +2325,7 @@ class GravityLabApp:
 
     def _run_validation(self):
         """Run the reproducible numerical checks and show a compact report."""
-        from .selftest import run_selftest
+        from ..selftest import run_selftest
         output = io.StringIO()
         try:
             with redirect_stdout(output):
@@ -2332,8 +2379,17 @@ class GravityLabApp:
             messagebox.showerror("CSV export failed", str(exc), parent=self.root)
 
     def _on_key(self, event):
-        widget = self.root.focus_get()
-        if widget is not None and widget.winfo_class() in ("TEntry", "Entry", "TCombobox", "TButton", "TCheckbutton", "TScale"):
+        try:
+            if event.widget.winfo_toplevel() is not self.root:
+                return  # keystrokes inside dialogs are not simulation shortcuts
+        except (AttributeError, tk.TclError):
+            return
+        try:
+            widget = self.root.focus_get()
+        except (KeyError, tk.TclError):
+            widget = None
+        if widget is not None and widget.winfo_class() in (
+                "TEntry", "Entry", "TCombobox", "TSpinbox", "Spinbox", "Text", "TButton", "TCheckbutton", "TScale"):
             return
         if event.keysym == "space":
             self._toggle_running()

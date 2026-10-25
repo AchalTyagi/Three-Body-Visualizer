@@ -37,7 +37,10 @@ FIG8 = [body(1, 0.055, (-0.97000436, 0.24308753, 0), (0.466203685, 0.43236573, 0
         body(1, 0.055, (0, 0, 0), (-0.93240737, -0.86473146, 0))]
 
 _INCL = math.radians(11.5)
-_VJ = 2 * math.pi / math.sqrt(5.2)
+# Circular speeds from the engine's own G (not a hard-coded 4*pi^2), so the preset
+# orbits stay consistent with the gravitational parameter actually used.
+_VJ = math.sqrt(G_AU_MSUN_YR / 5.2)
+_VE = math.sqrt(G_AU_MSUN_YR * (1.0 + 3.003e-6))
 
 
 def periodic_orbit(name, p1, p2, period, *, family, view=3.2, dt=0.003):
@@ -94,7 +97,7 @@ PRESETS = {
         units=ASTRO, G=G_AU_MSUN_YR, dt=0.001, steps=10, view=6.5, soft=0.0, threshold=10.0,
         adaptive=False, autozoom=False, collision="Merge (inelastic)",
         bodies=[body(1.0, 0.00465, (0, 0, 0), (0, 0, 0)),
-                body(3.003e-6, 4.26e-5, (1, 0, 0), (0, 2*math.pi, 0)),
+                body(3.003e-6, 4.26e-5, (1, 0, 0), (0, _VE, 0)),
                 body(9.546e-4, 4.78e-4, (-5.2, 0, 0), (0, -_VJ*math.cos(_INCL), -_VJ*math.sin(_INCL)))]),
 
     # Published equal-mass, zero-angular-momentum periodic-orbit seeds from the

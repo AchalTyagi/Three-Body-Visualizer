@@ -33,10 +33,13 @@ PAIRS = ((0, 1), (0, 2), (1, 2))
 # Internal SI conversions for astronomical-unit / solar-mass / year units.
 AU_M = 1.495978707e11
 YEAR_S = 3.15576e7
-MSUN_KG = 1.98847e30
-AU_KM = AU_M / 1000.0
 G_SI = 6.67430e-11
-G_AU_MSUN_YR = G_SI * MSUN_KG * YEAR_S**2 / AU_M**3
+# Heliocentric gravitational parameter (JPL DE440). It is known far more precisely
+# than G or the solar mass separately, so MSUN_KG and G (in AU/Msun/yr) derive from it.
+GM_SUN_SI = 1.32712440041279419e20  # m^3 s^-2
+MSUN_KG = GM_SUN_SI / G_SI
+AU_KM = AU_M / 1000.0
+G_AU_MSUN_YR = GM_SUN_SI * YEAR_S**2 / AU_M**3
 C_AU_PER_YEAR = 299792458.0 * YEAR_S / AU_M
 
 
@@ -390,6 +393,26 @@ class ThreeBodyEngine:
         return tau
 
     def step(self, h: float, method: str = YOSHIDA):
+        """Advance exactly ``h`` model-time units (see ``_step_impl``).
+
+        Pause-on-impact bookkeeping is re-armed before and after the step: a pair
+        stops counting as "touching" once the bodies separate beyond contact.
+        """
+        self._prune_touching()
+        self._step_impl(h, method)
+        self._prune_touching()
+
+    def _prune_touching(self):
+        """Drop pause-on-impact pairs that are inactive or have separated beyond contact."""
+        for i, j in tuple(self._touching):
+            if not (self.alive[i] and self.alive[j]):
+                self._touching.discard((i, j))
+                continue
+            gap = float(np.linalg.norm(self.pos[j] - self.pos[i]))
+            if gap > (self.R[i] + self.R[j]) * (1.0 + 1e-9):
+                self._touching.discard((i, j))
+
+    def _step_impl(self, h: float, method: str = YOSHIDA):
         """Advance exactly ``h`` model-time units, resolving finite-radius impacts.
 
         Collision time is first estimated from relative position/velocity. The
@@ -447,6 +470,7 @@ class ThreeBodyEngine:
             start_pos = self.pos.copy()
             start_vel = self.vel.copy()
             start_alive = self.alive.copy()
+            start_tidal = self.tidal_energy_dissipated
             self._integrate_interval(remaining, method)
             hit = None if self.collision == PASS else self._swept_first_contact(
                 start_pos, self.pos, start_alive
@@ -456,6 +480,8 @@ class ThreeBodyEngine:
                 # Rewind and integrate to the interpolated first-contact time.
                 self.pos = start_pos
                 self.vel = start_vel
+                # Discard heat booked during the rewound trial; re-integration re-adds it.
+                self.tidal_energy_dissipated = start_tidal
                 self._acc = None
                 hit_dt = max(0.0, min(remaining, remaining * fraction))
                 if hit_dt > max(h * 1e-13, 1e-14):
@@ -592,6 +618,8 @@ class ThreeBodyEngine:
         for i, j in PAIRS:
             if not (self.alive[i] and self.alive[j]):
                 continue
+            if (i, j) in self._touching:
+                continue
             r = self.pos[j] - self.pos[i]
             v = self.vel[j] - self.vel[i]
             radius = self.R[i] + self.R[j]
@@ -621,6 +649,8 @@ class ThreeBodyEngine:
         pair_best = None
         for i, j in PAIRS:
             if not (start_alive[i] and start_alive[j] and self.alive[i] and self.alive[j]):
+                continue
+            if (i, j) in self._touching:
                 continue
             r0 = start_pos[j] - start_pos[i]
             rend = end_pos[j] - end_pos[i]
