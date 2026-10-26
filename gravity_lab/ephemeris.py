@@ -13,6 +13,8 @@ from datetime import date, datetime
 import json
 import math
 import re
+import time
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -39,6 +41,70 @@ SOLAR_SYSTEM_BODIES = {
     "Uranus":  {"id": "799", "mass": 4.36587e-5,  "radius_au": 2.5362e4 / (AU_M / 1000.0)},
     "Neptune": {"id": "899", "mass": 5.15079e-5,  "radius_au": 2.4622e4 / (AU_M / 1000.0)},
 }
+
+class HorizonsServerError(RuntimeError):
+    """JPL Horizons failed on its own side (outage, overload or internal fault).
+
+    Nothing is wrong with the requested body or epoch; retrying later usually works.
+    """
+
+
+# Fragments of messages that come from Horizons' own backend (for example
+# "wldini(): missing required file ..."), not from a problem with the request.
+_SERVER_FAULT_MARKERS = (
+    "wldini", "missing required file", "var not declared", "execution-control",
+    "internal error", "internal server error", "service unavailable",
+    "temporarily unavailable", "try again later", "server is busy", "too many requests",
+)
+_TRANSIENT_HTTP_CODES = frozenset({408, 425, 429, 500, 502, 503, 504})
+_sleep = time.sleep  # indirection so tests can run without real delays
+
+
+def _looks_like_server_fault(text) -> bool:
+    lowered = str(text).lower()
+    return any(marker in lowered for marker in _SERVER_FAULT_MARKERS)
+
+
+def _query_horizons(request, name: str, timeout: float, retries: int, backoff: float) -> dict:
+    """Return Horizons' JSON reply, retrying transient server/network failures.
+
+    Request errors (unknown target, bad epoch, ...) are returned immediately for the
+    caller to report; they are never retried. Delays grow as backoff, 2*backoff, ...
+    """
+    attempts = max(0, int(retries)) + 1
+    kind, detail = "server", ""
+    for attempt in range(attempts):
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            if exc.code not in _TRANSIENT_HTTP_CODES:
+                raise RuntimeError(f"Could not contact JPL Horizons for {name}: HTTP {exc.code} {exc.reason}") from exc
+            kind, detail = "server", f"HTTP {exc.code} {exc.reason}"
+        except ValueError as exc:  # non-JSON reply, e.g. an HTML maintenance page
+            kind, detail = "server", f"unreadable reply ({exc})"
+        except (URLError, OSError) as exc:  # DNS failure, refused connection, timeout
+            kind, detail = "network", str(exc)
+        else:
+            result_text = str(payload.get("result", ""))
+            error = payload.get("error")
+            if error and _looks_like_server_fault(error):
+                kind, detail = "server", str(error).strip()
+            elif "$$SOE" not in result_text and _looks_like_server_fault(result_text):
+                kind, detail = "server", result_text.strip()
+            else:
+                return payload
+        if attempt < attempts - 1:
+            _sleep(backoff * (2 ** attempt))
+    if kind == "network":
+        raise RuntimeError(
+            f"Could not contact JPL Horizons for {name} after {attempts} attempts: {detail}. "
+            "Check your internet connection or try again later.")
+    raise HorizonsServerError(
+        f"JPL Horizons is having a server-side problem (not caused by your inputs) while "
+        f"fetching {name}; {attempts} attempts failed. This is usually temporary, so try again later. "
+        f"Last response: {detail[:300]}")
+
 
 _NUMBER = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[EeDd][+-]?\d+)?"
 
@@ -114,8 +180,13 @@ def validate_horizons_epoch(epoch: str) -> str:
     raise ValueError("Epoch must be a valid YYYY-MM-DD date or YYYY-MM-DD HH:MM time (TDB).")
 
 
-def fetch_horizons_body(name: str, epoch: str, timeout: float = 20.0) -> HorizonsBodyState:
-    """Fetch a single body's geometric SSB state from the official JPL Horizons API."""
+def fetch_horizons_body(name: str, epoch: str, timeout: float = 20.0, *,
+                        retries: int = 2, backoff: float = 1.5) -> HorizonsBodyState:
+    """Fetch a single body's geometric SSB state from the official JPL Horizons API.
+
+    Transient server-side failures are retried ``retries`` times with exponential
+    backoff before ``HorizonsServerError`` is raised.
+    """
     if name not in SOLAR_SYSTEM_BODIES:
         raise ValueError(f"Unsupported Solar System body: {name!r}.")
     parsed_epoch = validate_horizons_epoch(epoch)
@@ -139,11 +210,7 @@ def fetch_horizons_body(name: str, epoch: str, timeout: float = 20.0) -> Horizon
     }
     url = HORIZONS_URL + "?" + urlencode(params)
     request = Request(url, headers={"User-Agent": "GravityLab3D/1.0 (JPL Horizons state import)"})
-    try:
-        with urlopen(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except Exception as exc:
-        raise RuntimeError(f"Could not contact JPL Horizons for {name}: {exc}") from exc
+    payload = _query_horizons(request, name, timeout, retries, backoff)
     if payload.get("error"):
         raise RuntimeError(f"JPL Horizons error for {name}: {payload['error']}")
     result_text = payload.get("result", "")

@@ -92,6 +92,8 @@ Use **File → Import JPL Horizons states…** to select an epoch and three dist
 
 Horizons API reference: [NASA/JPL Horizons API documentation](https://ssd-api.jpl.nasa.gov/doc/horizons.html).
 
+If Horizons itself fails (for example an internal error such as `wldini(): missing required file`, an HTTP 5xx reply, or a maintenance page), the importer retries a couple of times with increasing delays and then reports a server-side problem. Those failures are on JPL's side and usually clear up later. Problems with your request, such as an unknown body or an invalid epoch, are reported immediately and are not retried.
+
 For an independent reference calculation, install the optional package:
 
 ```bash
