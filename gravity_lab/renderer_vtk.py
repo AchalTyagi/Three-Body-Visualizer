@@ -434,7 +434,8 @@ class GravityScene:
         for actor, color in zip(self.axis_tick_actors, self.axis_colors):
             actor.GetProperty().SetColor(*_hex_rgb(color))
         self.field_actor.GetMapper().SetLookupTable(_build_lut(self.theme["field_stops"]))
-        self.render_window.Render()
+        # Restyling never renders by itself: callers redraw via render()/save_png(), so building
+        # or theming a scene needs no OpenGL context (headless CI, tests, offscreen tools).
 
     def set_body_colors(self, colors):
         """Apply the user's three display colors to bodies, shells and trajectories."""
@@ -451,7 +452,7 @@ class GravityScene:
         for actors in actor_groups:
             for actor, color in zip(actors, self.body_colors):
                 actor.GetProperty().SetColor(*_hex_rgb(color))
-        self.render_window.Render()
+        # No implicit render here; see set_theme().
 
     def set_display_options(self, *, display_scale=None, show_shells=None, show_field=None,
                             show_trails=None, show_floor=None, show_acceleration=None,
