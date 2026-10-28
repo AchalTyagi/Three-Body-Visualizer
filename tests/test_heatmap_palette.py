@@ -1,9 +1,9 @@
 from gravity_lab.themes import FIELD_HEATMAP_STOPS, THEMES
 
 
-def test_all_themes_use_midnight_dark_heatmap_palette():
-    expected = THEMES["Midnight Dark"]["field_stops"]
-    assert tuple(expected) == FIELD_HEATMAP_STOPS
+def test_both_themes_share_the_same_heatmap_palette():
+    expected = list(FIELD_HEATMAP_STOPS)
+    assert set(THEMES) == {"Light", "Dark"}
     assert all(theme["field_stops"] == expected for theme in THEMES.values())
 
 

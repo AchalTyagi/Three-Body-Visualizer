@@ -21,12 +21,12 @@
 - Use **Fit View** to frame the current system without resetting its physics state.
 - Set **Focus** in the top toolbar to lock the camera to a body as it moves; your orbit angle, zoom and any pan offset are kept. Press **C** to re-centre on the body, or choose **System center** to return to the normal camera focus.
 - Set **Reference** to a body to view positions, velocities, and acceleration vectors relative to it. Choose **Inertial frame** to return to the original coordinates. This changes only the visualization, not the simulated physics.
-- Use the Settings menu to change theme and 2D/3D view.
+- Use the Settings menu to choose Match system, Light or Dark theme and the 2D/3D view.
 - Use File → Save setup to JSON to save body inputs and physics configuration; use Save exact simulation checkpoint to preserve runtime state.
 
 ## User preference persistence
 
-Gravity Lab 3D automatically remembers the UI theme, visualizer mode, playback speed, display scale, axes/trails/shells/field toggles, and selected view parameters. These preferences are separate from setup files and simulation checkpoints. Corrupt or unsupported preference files are ignored and defaults are used.
+Gravity Lab 3D automatically remembers the theme mode (Match system, Light or Dark), visualizer mode, playback speed, display scale, axes/trails/shells/field toggles, and selected view parameters. These preferences are separate from setup files and simulation checkpoints. Corrupt or unsupported preference files are ignored and defaults are used.
 
 Preference locations:
 
@@ -36,4 +36,4 @@ Preference locations:
 
 ## Heatmap palette
 
-The gravitational field heatmap always uses the Midnight Dark palette regardless of the selected interface theme. UI backgrounds, text, buttons, axes, and grids remain theme-specific. This preserves the meaning of field-map colours when comparing screenshots across themes.
+The gravitational field heatmap always uses the same dark palette in both the Light and Dark themes. UI backgrounds, text, buttons, axes, and grids remain theme-specific. This preserves the meaning of field-map colours when comparing screenshots across themes.

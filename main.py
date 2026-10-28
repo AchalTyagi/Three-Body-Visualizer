@@ -28,7 +28,8 @@ def build_parser():
     p.add_argument("--snapshot", metavar="PATH", help="render a headless PNG snapshot to PATH")
     p.add_argument("--preset", default="3D inclined triple (recommended)", help="system preset for --snapshot")
     p.add_argument("--time", type=float, default=0.0, help="advance simulation to this time before snapshot")
-    p.add_argument("--theme", default="Dark", help="theme for --snapshot")
+    p.add_argument("--theme", default="Dark", choices=("Light", "Dark", "System"),
+                   help="theme for --snapshot (System follows the operating system setting)")
     p.add_argument("--width", type=int, default=1500, help="snapshot width in pixels")
     p.add_argument("--height", type=int, default=950, help="snapshot height in pixels")
     p.add_argument("--view-mode", choices=("2D", "3D"), default="3D", help="snapshot camera mode (2D XY or 3D)")
@@ -50,7 +51,8 @@ def main(argv=None):
         from gravity_lab.presets import PRESETS, engine_inputs
         from gravity_lab.physics import ThreeBodyEngine, PASS, YOSHIDA
         from gravity_lab.renderer_vtk import GravityScene
-        from gravity_lab.themes import THEMES
+        from gravity_lab.system_theme import detect_system_theme
+        from gravity_lab.themes import resolve_theme
         import vtk
         if args.preset not in PRESETS:
             print(f"Unknown preset {args.preset!r}. Use --list-presets to inspect names.", file=sys.stderr)
@@ -84,7 +86,8 @@ def main(argv=None):
         window = vtk.vtkRenderWindow()
         window.SetSize(max(320, args.width), max(240, args.height))
         window.SetOffScreenRendering(1)
-        scene = GravityScene(window, theme=args.theme if args.theme in THEMES else "Dark")
+        scene = GravityScene(window, theme=resolve_theme(
+            args.theme, detect_system_theme() if args.theme == "System" else None))
         scene.set_view_mode(args.view_mode)
         display_scale = float(p.get("display_scale", 1.8))
         show_shells = bool(p.get("show_shells", True))

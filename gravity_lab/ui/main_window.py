@@ -35,7 +35,9 @@ from ..application import SimulationController, state_from_inputs
 from ..state_io import save_checkpoint, load_checkpoint
 from ..setup_io import write_setup_json, read_setup_json
 from ..state import BodyState, IntegratorSettings, PhysicsSettings, SimulationState
-from ..themes import THEMES, BODY_COLORS, BODY_NAMES
+from ..system_theme import detect_system_theme
+from ..themes import (THEMES, THEME_MODES, DEFAULT_THEME_MODE, BODY_COLORS, BODY_NAMES,
+                      resolve_theme)
 from ..preferences import load_preferences, save_preferences
 from .diagnostics_panel import SparkGraph, format_finite, minimum_active_pair_separation
 from ..orbital_analysis import barycentric_frame, pairwise_relative_metrics
@@ -89,7 +91,9 @@ class GravityLabApp:
         self.last_reference_report = ""
         self._closest_approach = {}
 
-        self.theme_var = tk.StringVar(value="Dark")
+        self.theme_var = tk.StringVar(value="Dark")  # palette in use: "Light" or "Dark"
+        self.theme_mode_var = tk.StringVar(value=DEFAULT_THEME_MODE)  # System, Light or Dark
+        self._system_theme = None  # latest OS appearance, written by the watcher thread
         self.view_mode_var = tk.StringVar(value="3D")
         self.camera_focus_var = tk.StringVar(value="System center")
         self.camera_view_preset_var = tk.StringVar(value="Free orbit")
@@ -162,13 +166,15 @@ class GravityLabApp:
         self._load_preset()
         self.root.bind_all("<Key>", self._on_key)
         self.root.protocol("WM_DELETE_WINDOW", self._close)
+        self._start_system_theme_watcher()
         self._schedule_tick()
 
     def _load_user_preferences(self):
         """Restore UI-only preferences without restoring a simulation or body state."""
         preferences = load_preferences()
-        if preferences.get("theme") in THEMES:
-            self.theme_var.set(preferences["theme"])
+        if preferences.get("theme_mode") in THEME_MODES:
+            self.theme_mode_var.set(preferences["theme_mode"])
+        self.theme_var.set(self._resolve_theme())
         if preferences.get("view_mode") in ("2D", "3D"):
             self.view_mode_var.set(preferences["view_mode"])
         for key, variable in (
@@ -189,6 +195,8 @@ class GravityLabApp:
         preferences = {
             "schema_version": 1,
             "theme": self.theme_var.get() if self.theme_var.get() in THEMES else "Dark",
+            "theme_mode": (self.theme_mode_var.get() if self.theme_mode_var.get() in THEME_MODES
+                           else DEFAULT_THEME_MODE),
             "view_mode": self.view_mode_var.get() if self.view_mode_var.get() in ("2D", "3D") else "3D",
             "speed": float(self.speed_var.get()),
             "display_scale": float(self.display_scale_var.get()),
@@ -250,9 +258,9 @@ class GravityLabApp:
 
         settings = tk.Menu(menubar, tearoff=False)
         themes = tk.Menu(settings, tearoff=False)
-        for theme_name in THEMES:
-            themes.add_radiobutton(label=theme_name, variable=self.theme_var, value=theme_name,
-                                   command=self._apply_theme)
+        for mode, label in (("System", "Match system"), ("Light", "Light"), ("Dark", "Dark")):
+            themes.add_radiobutton(label=label, variable=self.theme_mode_var, value=mode,
+                                   command=self._on_theme_mode_changed)
         settings.add_cascade(label="Theme", menu=themes)
         view_menu = tk.Menu(settings, tearoff=False)
         for mode in ("2D", "3D"):
@@ -512,8 +520,8 @@ class GravityLabApp:
             # Backward-compatible schema-1 setup files predate the axes toggle.
             if "axes" not in settings:
                 self.axes_var.set(True)
-            if settings.get("theme") in THEMES:
-                self.theme_var.set(settings["theme"])
+            # The theme is a user preference (Settings → Theme), not part of a setup, so loading a
+            # setup keeps the current theme instead of overriding it.
             if settings.get("view_mode") in ("2D", "3D"):
                 self.view_mode_var.set(settings["view_mode"])
             self.enable_oblateness_var.set(bool(settings.get("enable_oblateness", False)))
@@ -1278,6 +1286,53 @@ class GravityLabApp:
             self.scene.set_theme(self.theme_var.get())
             self.scene.set_body_colors(self.body_colors)
             self._dirty = True
+
+    SYSTEM_THEME_POLL_SECONDS = 3.0
+
+    def _resolve_theme(self):
+        """Palette ("Light"/"Dark") for the selected mode, asking the OS when the mode is System."""
+        mode = self.theme_mode_var.get()
+        return resolve_theme(mode, detect_system_theme() if mode == "System" else None)
+
+    def _on_theme_mode_changed(self):
+        if self.theme_mode_var.get() not in THEME_MODES:
+            self.theme_mode_var.set(DEFAULT_THEME_MODE)
+        self.theme_var.set(self._resolve_theme())
+        self._apply_theme()
+        self.event_var.set(f"Theme: {self.theme_mode_var.get()} ({self.theme_var.get()}).")
+
+    def _start_system_theme_watcher(self):
+        """Follow OS light/dark changes while the mode is System.
+
+        Detection runs on a daemon thread that only assigns a plain attribute; all Tk work
+        happens in ``_check_system_theme`` on the main thread.
+        """
+        def worker():
+            while not self._closed:
+                try:
+                    self._system_theme = detect_system_theme()
+                except Exception:
+                    self._system_theme = None
+                time.sleep(self.SYSTEM_THEME_POLL_SECONDS)
+
+        threading.Thread(target=worker, daemon=True, name="SystemThemeWatcher").start()
+        self._schedule_theme_check()
+
+    def _schedule_theme_check(self):
+        if not self._closed:
+            self.root.after(1000, self._check_system_theme)
+
+    def _check_system_theme(self):
+        try:
+            detected = self._system_theme
+            if (not self._closed and self.theme_mode_var.get() == "System"
+                    and detected in THEMES and detected != self.theme_var.get()):
+                self.theme_var.set(detected)
+                self._apply_theme()
+        except Exception:
+            pass  # theme following is cosmetic; never let it break the UI loop
+        finally:
+            self._schedule_theme_check()
 
     def _apply_theme(self):
         self._configure_style()

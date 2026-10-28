@@ -23,10 +23,10 @@ def test_preferences_path_is_platform_specific(tmp_path):
 
 def test_preferences_round_trip_is_atomic_and_validated(tmp_path):
     path = tmp_path / "settings" / "preferences.json"
-    expected = dict(DEFAULT_PREFERENCES, theme="Midnight Dark", view_mode="2D", speed=2.0, axes=False)
+    expected = dict(DEFAULT_PREFERENCES, theme="Light", theme_mode="Light", view_mode="2D", speed=2.0, axes=False)
     save_preferences(expected, path)
     assert load_preferences(path) == expected
-    assert json.loads(path.read_text(encoding="utf-8"))["theme"] == "Midnight Dark"
+    assert json.loads(path.read_text(encoding="utf-8"))["theme_mode"] == "Light"
     assert not list(path.parent.glob("*.tmp"))
 
 

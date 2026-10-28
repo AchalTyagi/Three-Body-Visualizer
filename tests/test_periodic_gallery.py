@@ -33,9 +33,8 @@ def test_periodic_gallery_is_complete_and_uses_pass_through_point_mass_setup():
         np.testing.assert_allclose(np.sum(np.asarray(masses)[:, None] * np.asarray(vel), axis=0), 0, atol=1e-12)
 
 
-def test_minimal_dark_and_expanded_themes_have_all_required_palette_fields():
-    assert "Minimal Dark" in THEMES
-    assert len(THEMES) >= 11
+def test_light_and_dark_themes_have_all_required_palette_fields():
+    assert tuple(THEMES) == ("Dark", "Light")
     required = {"app_bg", "panel_bg", "plot_bg", "text", "muted", "accent", "entry_bg",
                 "border", "button_bg", "button_active", "grid", "field_stops"}
     for name, palette in THEMES.items():

@@ -11,11 +11,14 @@ import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
+from .themes import DEFAULT_THEME_MODE, FALLBACK_THEME, THEME_MODES, THEMES
+
 PREFERENCES_SCHEMA = 1
 APP_DIR_NAME = "GravityLab3D"
 DEFAULT_PREFERENCES: dict[str, Any] = {
     "schema_version": PREFERENCES_SCHEMA,
-    "theme": "Dark",
+    "theme": FALLBACK_THEME,  # palette last in use (informational)
+    "theme_mode": DEFAULT_THEME_MODE,  # System, Light or Dark
     "view_mode": "3D",
     "speed": 1.0,
     "display_scale": 1.8,
@@ -56,6 +59,11 @@ def validate_preferences(value: object) -> dict[str, Any]:
         raise ValueError("Unsupported Gravity Lab 3D preferences format.")
     data = dict(DEFAULT_PREFERENCES)
     data.update({key: item for key, item in value.items() if key in data})
+    # Unknown or retired values (for example removed themes) fall back instead of discarding everything.
+    if data["theme_mode"] not in THEME_MODES:
+        data["theme_mode"] = DEFAULT_THEME_MODE
+    if data["theme"] not in THEMES:
+        data["theme"] = FALLBACK_THEME
     if data["view_mode"] not in ("2D", "3D"):
         raise ValueError("view_mode must be '2D' or '3D'.")
     for key in ("speed", "display_scale"):
