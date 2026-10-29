@@ -7,6 +7,8 @@ on:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: "1"  # UTF-8 stdout on Windows runners (the self-test prints ε, ², —)
     strategy:
       fail-fast: false
       matrix:

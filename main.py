@@ -36,7 +36,25 @@ def build_parser():
     return p
 
 
+def _configure_output_encoding():
+    """Keep printing from crashing on narrow consoles/pipes (e.g. Windows cp1252 in CI).
+
+    The self-test and CLI print symbols such as ε, ² and —. Redirected output is
+    switched to UTF-8; interactive consoles keep their encoding and only get a safe error
+    handler, so nothing can raise UnicodeEncodeError.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if stream.isatty():
+                stream.reconfigure(errors="replace")
+            else:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass  # replaced/closed streams (some IDEs, pytest capture) are left alone
+
+
 def main(argv=None):
+    _configure_output_encoding()
     args = build_parser().parse_args(argv)
     if args.selftest:
         from gravity_lab.selftest import run_selftest
