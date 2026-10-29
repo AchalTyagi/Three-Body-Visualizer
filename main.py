@@ -1,25 +1,15 @@
-"""Launch Gravity Lab 3D.
-
-Examples:
-  python main.py
-  python main.py --selftest
-  python main.py --list-presets
-  python main.py --snapshot preview.png --preset "Sun - Earth - Jupiter (astronomical)" --time 2 --view-mode 2D
-"""
 from __future__ import annotations
 import argparse
 import math
 import platform
 import sys
 
-# Apply Windows DPI awareness before any Tkinter import or Tk window creation.
 if platform.system() == "Windows":
     try:
         from ctypes import windll
         windll.shcore.SetProcessDpiAwareness(1)
     except Exception:
         pass
-
 
 def build_parser():
     p = argparse.ArgumentParser(description="Interactive 3D Newtonian three-body gravity simulator")
@@ -37,12 +27,6 @@ def build_parser():
 
 
 def _configure_output_encoding():
-    """Keep printing from crashing on narrow consoles/pipes (e.g. Windows cp1252 in CI).
-
-    The self-test and CLI print symbols such as ε, ² and —. Redirected output is
-    switched to UTF-8; interactive consoles keep their encoding and only get a safe error
-    handler, so nothing can raise UnicodeEncodeError.
-    """
     for stream in (sys.stdout, sys.stderr):
         try:
             if stream.isatty():
@@ -50,8 +34,7 @@ def _configure_output_encoding():
             else:
                 stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError, OSError):
-            pass  # replaced/closed streams (some IDEs, pytest capture) are left alone
-
+            pass
 
 def main(argv=None):
     _configure_output_encoding()
@@ -80,16 +63,10 @@ def main(argv=None):
             return 2
         p = PRESETS[args.preset]
         m, r, pos, vel = engine_inputs(p)
-        # Use the preset's physical collision model where available. With exact
-        # Newtonian gravity, preventing contact tunneling is preferable to
-        # letting finite-radius bodies pass through one another by default.
         engine = ThreeBodyEngine(m, r, pos, vel, p["G"], p["soft"], collision=p.get("collision", PASS))
         target = float(args.time)
-        # Fixed stepping is deterministic for snapshots and remains independent of Tk.
         dt = min(float(p["dt"]), max(target / 4000.0, 1e-5)) if target else float(p["dt"])
         method = p.get("integrator", YOSHIDA)
-        # Keep a bounded, evenly sampled path history so headless screenshots show
-        # the trajectory up to the requested time rather than a single final dot.
         estimated_steps = max(1, int(math.ceil(target / max(dt, 1e-15)))) if target else 1
         stride = max(1, int(math.ceil(estimated_steps / 1200.0)))
         path_positions = [engine.pos.copy()]
@@ -114,9 +91,7 @@ def main(argv=None):
         show_floor = bool(p.get("show_floor", True))
         scene.view_halfwidth = float(p["view"])
         scene.threshold = float(p["threshold"])
-        scene.set_display_options(display_scale=display_scale, show_shells=show_shells,
-                                  show_field=show_field, show_trails=show_trails,
-                                  show_floor=show_floor, threshold=scene.threshold)
+        scene.set_display_options(display_scale=display_scale, show_shells=show_shells, show_field=show_field, show_trails=show_trails, show_floor=show_floor, threshold=scene.threshold)
         scene.reset_trails(path_positions[0], max(10, min(1200, len(path_positions) + 1)))
         for path_pos, path_live in zip(path_positions[1:], path_alive[1:]):
             scene.push_positions(path_pos, path_live)
@@ -137,7 +112,6 @@ def main(argv=None):
     GravityLabApp(root)
     root.mainloop()
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
